@@ -21,7 +21,8 @@ from qna.models import Question
 logger = logging.getLogger(__name__)
 
 
-# --- CÁC HÀM XỬ LÝ NLP VÀ AI (LẤY TỪ NOTEBOOK) ---
+# --- CÁC HÀM XỬ LÝ NLP VÀ AI (CẬP NHẬT TỪ NOTEBOOK) ---
+
 def preprocess_text_vietnamese(text):
     text = text.lower()
     text = normalize('NFC', text)
@@ -35,6 +36,35 @@ def get_sentence_embedding(text, tokenizer, model, device):
     with torch.no_grad():
         outputs = model(**inputs)
     return outputs.last_hidden_state.mean(dim=1)
+
+
+def rephrase_text_with_gemini(text, question_barem, gemini_model):
+    """
+    Sử dụng Gemini để sửa lỗi chính tả/ngữ pháp cho transcript từ Whisper.
+    Logic được lấy từ file Untitled0.ipynb.
+    """
+    if not text or gemini_model is None:
+        return text
+
+    # Trích xuất các key points từ barem để làm ngữ cảnh
+    barem_text = "\n".join([f"- {kp['text']}" for kp in question_barem['key_points']])
+    prompt = f"""Văn bản sau là câu trả lời của sinh viên, được nhận dạng từ giọng nói. Dựa vào câu hỏi và barem điểm, hãy sửa lỗi chính tả, ngữ pháp và những từ bị nhận dạng sai do giọng địa phương. Chỉ sửa những lỗi thực sự cần thiết để câu trả lời khớp với barem, không thay đổi cấu trúc câu hay diễn đạt nếu nó không sai. Trả về duy nhất văn bản đã được sửa.
+
+--- CÂU HỎI ---
+{question_barem['question']}
+
+--- BAREM ĐIỂM THAM KHẢO ---
+{barem_text}
+
+--- CÂU TRẢ LỜI CỦA SINH VIÊN (VĂN BẢN GỐC TỪ ASR) ---
+{text}
+"""
+    try:
+        response = gemini_model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        logger.error(f"Lỗi khi rephrase văn bản: {e}")
+        return text
 
 
 def score_traditional(student_answer, barem_key_points, tokenizer, model, device, threshold=0.6):
@@ -91,6 +121,7 @@ class Command(BaseCommand):
         self.stdout.write(f"Sử dụng thiết bị: {self.device} với kiểu tính toán {self.compute_type}")
 
         self.stdout.write("Đang tải Whisper model (sử dụng faster-whisper)...")
+        # === NÂNG CẤP MÔ HÌNH TẠI ĐÂY THEO YÊU CẦU CỦA BẠN ===
         self.whisper_model = WhisperModel("medium", device=self.device, compute_type=self.compute_type)
         self.stdout.write("✅ Whisper đã sẵn sàng.")
 
@@ -121,10 +152,10 @@ class Command(BaseCommand):
                 all_barems = json.load(f)
             for barem in all_barems:
                 if barem['id'] == question_obj.question_id_in_barem:
-                    return question_obj.question_text, barem['key_points']
+                    return barem  # Trả về toàn bộ barem object
         except Exception as e:
             logger.error(f"Không thể tải barem cho câu hỏi {question_id}: {e}")
-        return None, None
+        return None
 
     async def process_end(self, message):
         reply_channel = message['reply_channel']
@@ -132,17 +163,15 @@ class Command(BaseCommand):
         audio_path = self.audio_files.pop(reply_channel, None)
 
         if not audio_path or not os.path.exists(audio_path):
-            logger.warning(f"Không tìm thấy file âm thanh cho kênh {reply_channel}")
             return
 
         try:
             file_size = os.path.getsize(audio_path)
-            logger.info(f"File âm thanh {audio_path} có kích thước {file_size} bytes.")
-            if file_size < 1024:  # Nếu file nhỏ hơn 1KB, coi như không hợp lệ
+            if file_size < 1024:
                 logger.warning("File âm thanh quá nhỏ, có thể không có nội dung.")
                 await self.channel_layer.send(reply_channel, {'type': 'exam.result', 'message': {
                     'error': 'Ghi âm quá ngắn hoặc không có âm thanh. Vui lòng thử lại.'}})
-                os.remove(audio_path)
+                if os.path.exists(audio_path): os.remove(audio_path)
                 return
         except OSError as e:
             logger.error(f"Không thể kiểm tra kích thước file: {e}")
@@ -152,37 +181,42 @@ class Command(BaseCommand):
         try:
             segments, _ = await asyncio.to_thread(self.whisper_model.transcribe, audio_path, language="vi")
             transcript_parts = [segment.text for segment in segments]
-            final_transcript = "".join(transcript_parts).strip()
+            raw_transcript = "".join(transcript_parts).strip()
         except Exception as e:
             logger.error(f"Lỗi khi nhận dạng giọng nói: {e}")
-            final_transcript = ""
+            raw_transcript = ""
         finally:
             if os.path.exists(audio_path):
                 os.remove(audio_path)
 
-        if not final_transcript:
+        if not raw_transcript:
             await self.channel_layer.send(reply_channel, {'type': 'exam.result', 'message': {
                 'error': 'Không nhận dạng được giọng nói. Vui lòng thử lại.'}})
             return
 
-        logger.info(f"Transcript cuối cùng: '{final_transcript}'")
+        logger.info(f"Transcript gốc: '{raw_transcript}'")
 
-        question_text, barem_key_points = await self.get_question_and_barem(question_id)
-        if not barem_key_points:
+        question_barem = await self.get_question_and_barem(question_id)
+        if not question_barem:
             await self.channel_layer.send(reply_channel, {'type': 'exam.result', 'message': {
                 'error': 'Lỗi hệ thống: Không tìm thấy barem chấm điểm.'}})
             return
 
-        traditional_task = asyncio.to_thread(score_traditional, final_transcript, barem_key_points,
+        logger.info("Đang dùng Gemini để sửa lỗi transcript...")
+        rephrased_transcript = await asyncio.to_thread(rephrase_text_with_gemini, raw_transcript, question_barem,
+                                                       self.gemini_model)
+        logger.info(f"Transcript đã sửa: '{rephrased_transcript}'")
+
+        traditional_task = asyncio.to_thread(score_traditional, rephrased_transcript, question_barem['key_points'],
                                              self.phobert_tokenizer, self.phobert_model, self.device)
-        gemini_task = asyncio.to_thread(score_with_gemini, final_transcript, question_text, barem_key_points,
-                                        self.gemini_model)
+        gemini_task = asyncio.to_thread(score_with_gemini, rephrased_transcript, question_barem['question'],
+                                        question_barem['key_points'], self.gemini_model)
 
         traditional_score, gemini_result = await asyncio.gather(traditional_task, gemini_task)
 
         final_score = (gemini_result['score'] * 0.7) + (traditional_score * 0.3)
 
-        final_result = {"question_id": question_id, "transcript": final_transcript,
+        final_result = {"question_id": question_id, "transcript": rephrased_transcript,
                         "final_score": round(final_score, 2), "feedback": gemini_result.get('feedback', ''),
                         "analysis": gemini_result.get('analysis', [])}
 
@@ -191,7 +225,8 @@ class Command(BaseCommand):
     async def process_chunk(self, message):
         reply_channel = message['reply_channel']
         if reply_channel not in self.audio_files:
-            temp_file_path = os.path.join(settings.BASE_DIR, f'temp_audio_{reply_channel}.webm')
+            safe_channel_name = re.sub(r'[^a-zA-Z0-9]', '_', reply_channel)
+            temp_file_path = os.path.join(settings.BASE_DIR, f'temp_audio_{safe_channel_name}.webm')
             self.audio_files[reply_channel] = temp_file_path
             with open(temp_file_path, 'wb') as f:
                 f.write(message['audio_chunk'])

@@ -16,15 +16,15 @@
             </div>
 
             <div class="flex-shrink-0">
-                <h3 class="text-md font-semibold text-gray-700">Thời gian còn lại</h3>
+                <h3 class="text-md font-semibold text-gray-700">Thời gian trả lời còn lại</h3>
                 <div id="timer" class="mt-2 text-3xl font-mono bg-blue-100 text-blue-700 text-center py-2 rounded-lg transition-colors">
-                    03:00
+                    00:30
                 </div>
             </div>
 
             <div id="result-container" class="flex-1 overflow-y-auto space-y-4 hidden">
                 <div>
-                    <h3 class="text-md font-semibold text-gray-700">Câu trả lời của bạn (real-time)</h3>
+                    <h3 class="text-md font-semibold text-gray-700">Câu trả lời của bạn</h3>
                     <p id="transcript-text" class="mt-2 text-sm text-gray-600 bg-gray-100 p-3 rounded-lg h-24 overflow-y-auto"></p>
                 </div>
                 <div>
@@ -38,7 +38,7 @@
                 </div>
                 <div class="grid grid-cols-2 gap-4 items-center">
                      <div>
-                        <h3 class="text-md font-semibold text-gray-700">Thời gian làm bài</h3>
+                        <h3 class="text-md font-semibold text-gray-700">Thời gian trả lời</h3>
                         <p id="time-taken-display" class="font-semibold text-gray-800 text-lg text-center"></p>
                     </div>
                     <div>
@@ -66,7 +66,7 @@
             <div id="interaction-area" class="">
                 <i class="fas fa-microphone-alt text-5xl text-gray-300"></i>
                 <h2 class="text-2xl font-bold text-gray-800 mt-4">Sẵn sàng bắt đầu</h2>
-                <p class="text-gray-500 mt-2">Nhấn nút bên dưới để bắt đầu ghi âm câu trả lời.</p>
+                <p class="text-gray-500 mt-2">Bạn có 30 giây để ghi âm câu trả lời.</p>
                 <button id="start-btn" class="mt-8 bg-blue-600 text-white font-bold py-3 px-8 rounded-full hover:bg-blue-700 transition-all text-lg shadow-lg">
                     <i class="fas fa-play mr-2"></i> Bắt đầu trả lời
                 </button>
@@ -99,7 +99,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const examContent = document.getElementById('exam-content');
     if (!examContent) return;
 
-    // --- DOM Elements ---
     const elements = {
         interactionArea: document.getElementById('interaction-area'),
         recordingArea: document.getElementById('recording-area'),
@@ -119,14 +118,12 @@ document.addEventListener('DOMContentLoaded', () => {
         questionId: JSON.parse(document.getElementById('question_id_data').textContent),
     };
 
-    // --- State Variables ---
     let socket;
     let mediaRecorder;
     let timerInterval;
-    const EXAM_DURATION = 180;
-    let finalTimeRemaining = EXAM_DURATION;
+    const RECORDING_DURATION = 30; // Giới hạn ghi âm mỗi câu là 30 giây
+    let finalTimeTaken = 0;
 
-    // --- UI Update Functions ---
     const formatTime = (seconds) => {
         const minutes = Math.floor(seconds / 60).toString().padStart(2, '0');
         const secs = (seconds % 60).toString().padStart(2, '0');
@@ -142,13 +139,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const resetExamUI = () => {
         clearInterval(timerInterval);
-        elements.timer.textContent = formatTime(EXAM_DURATION);
+        elements.timer.textContent = formatTime(RECORDING_DURATION);
         elements.timer.className = 'mt-2 text-3xl font-mono bg-blue-100 text-blue-700 text-center py-2 rounded-lg transition-colors';
         updateUIState('interactionArea');
         elements.resultContainer.classList.add('hidden');
         elements.initialInfo.classList.remove('hidden');
         if (elements.timeTaken) elements.timeTaken.textContent = '';
-        finalTimeRemaining = EXAM_DURATION;
+        finalTimeTaken = 0;
     };
 
     const showResults = (resultData) => {
@@ -156,10 +153,8 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.initialInfo.classList.add('hidden');
         elements.resultContainer.classList.remove('hidden');
 
-        let timeTaken = EXAM_DURATION - finalTimeRemaining;
-        elements.timeTaken.textContent = formatTime(timeTaken < 0 ? 0 : timeTaken);
+        elements.timeTaken.textContent = formatTime(finalTimeTaken);
 
-        // DÙNG DỮ LIỆU THẬT TỪ SERVER
         elements.transcript.textContent = resultData.transcript || "Không nhận dạng được giọng nói.";
         elements.score.textContent = resultData.final_score || "N/A";
         elements.feedback.textContent = resultData.feedback || "Không có nhận xét.";
@@ -177,7 +172,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const percentage = analysisData.length > 0 ? Math.round((matchedCount / analysisData.length) * 100) : 0;
         elements.coverageSummary.textContent = `Mức độ bao phủ: ${matchedCount}/${analysisData.length} (${percentage}%)`;
 
-        // Gửi kết quả về server để lưu vào database
         fetch("{% url 'save_result' %}", {
             method: 'POST',
             headers: {
@@ -196,29 +190,27 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
-    // --- Timer Functions ---
     const startTimer = () => {
-        let timeLeft = EXAM_DURATION;
+        let timeLeft = RECORDING_DURATION;
         elements.timer.textContent = formatTime(timeLeft);
         timerInterval = setInterval(() => {
             timeLeft--;
-            finalTimeRemaining = timeLeft;
+            finalTimeTaken = RECORDING_DURATION - timeLeft;
             elements.timer.textContent = formatTime(timeLeft);
+
             if (timeLeft <= 10 && timeLeft > 0) {
                 elements.timer.className = 'mt-2 text-3xl font-mono bg-red-100 text-red-700 text-center py-2 rounded-lg transition-colors';
             } else if (timeLeft <= 0) {
-                clearInterval(timerInterval);
+                console.log("Hết giờ ghi âm, tự động dừng.");
                 elements.stopBtn.click();
             }
         }, 1000);
     };
 
-    // --- WebSocket and Media Recorder Logic ---
     const startExam = async () => {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
-            // Truyền question_id qua query string
             const wsPath = `${wsScheme}://${window.location.host}/ws/exam/${elements.subjectCode}/?question_id=${elements.questionId}`;
             socket = new WebSocket(wsPath);
 
@@ -231,7 +223,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         socket.send(event.data);
                     }
                 };
-                mediaRecorder.start(1000); // Gửi dữ liệu mỗi 1 giây
+                mediaRecorder.start(1000);
                 startTimer();
             };
 
@@ -270,11 +262,10 @@ document.addEventListener('DOMContentLoaded', () => {
         updateUIState('gradingArea');
     };
 
-    // --- Event Listeners ---
     elements.startBtn.addEventListener('click', startExam);
     elements.stopBtn.addEventListener('click', stopExam);
 
-    resetExamUI(); // Thiết lập trạng thái ban đầu
+    resetExamUI();
 });
 </script>
 {% endblock %}
