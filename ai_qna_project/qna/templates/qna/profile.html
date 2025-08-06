@@ -1,0 +1,140 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Thông tin cá nhân{% endblock %}
+
+{% block content %}
+<div id="profile-content" class="content-section">
+    <h2 class="text-3xl font-bold text-gray-800 mb-8">Thông tin cá nhân</h2>
+    <div class="bg-white p-8 rounded-xl shadow-md max-w-4xl mx-auto">
+        <div class="flex flex-col md:flex-row items-center md:items-start gap-8">
+            <div class="flex-shrink-0 flex flex-col items-center">
+                <label class="block text-sm font-medium text-gray-500 mb-2">Ảnh đại diện</label>
+                <div class="w-40 relative group aspect-w-3 aspect-h-4">
+                    <img id="profile-image-preview"
+                         src="{% if user_profile.profile_image %}{{ user_profile.profile_image.url }}{% else %}{% static 'images/default_avatar.png' %}{% endif %}"
+                         alt="Ảnh đại diện"
+                         class="object-cover rounded-md border-4 border-gray-200 shadow-sm transition-all duration-300 group-hover:border-indigo-400">
+
+                    <div class="absolute inset-0 bg-black bg-opacity-50 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 cursor-pointer"
+                         onclick="document.getElementById('profile-image-input').click();">
+                        <i class="fas fa-camera text-white text-2xl"></i>
+                        <input type="file" id="profile-image-input" accept="image/*" class="hidden">
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex-grow w-full">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-500">Họ và tên</label>
+                        <p class="mt-1 text-lg font-semibold text-gray-900">{{ full_name }}</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-500">Mã số sinh viên</label>
+                        <p class="mt-1 text-lg font-semibold text-gray-900">{{ student_id }}</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-500">Lớp</label>
+                        <p class="mt-1 text-lg font-semibold text-gray-900">{{ class_name }}</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-500">Khoa</label>
+                        <p class="mt-1 text-lg font-semibold text-gray-900">{{ faculty }}</p>
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="block text-sm font-medium text-gray-500">Email</label>
+                        <p class="mt-1 text-lg font-semibold text-gray-900">{{ email }}</p>
+                    </div>
+                </div>
+                <div class="mt-8 border-t pt-6 text-right">
+                    <button id="update-profile-btn" class="bg-indigo-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-indigo-700 transition-colors">
+                        Cập nhật thông tin
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const profileImageInput = document.getElementById('profile-image-input');
+    const profileImagePreview = document.getElementById('profile-image-preview');
+    const updateProfileBtn = document.getElementById('update-profile-btn');
+
+    if (profileImageInput && profileImagePreview) {
+        profileImageInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    profileImagePreview.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+    }
+
+    if (updateProfileBtn) {
+        updateProfileBtn.addEventListener('click', async () => {
+            const file = profileImageInput.files[0];
+            if (!file) {
+                alert('Vui lòng chọn một ảnh để tải lên.');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('profile_image', file);
+
+            function getCookie(name) {
+                let cookieValue = null;
+                if (document.cookie && document.cookie !== '') {
+                    const cookies = document.cookie.split(';');
+                    for (let i = 0; i < cookies.length; i++) {
+                        const cookie = cookies[i].trim();
+                        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                            break;
+                        }
+                    }
+                }
+                return cookieValue;
+            }
+            const csrftoken = getCookie('csrftoken');
+
+
+            try {
+                const response = await fetch("{% url 'update_profile_image' %}", {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'X-CSRFToken': csrftoken
+                    }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success) {
+                        alert('Cập nhật ảnh đại diện thành công!');
+                        if (data.image_url) {
+                            profileImagePreview.src = data.image_url;
+                        }
+                        profileImageInput.value = '';
+                    } else {
+                        alert('Cập nhật ảnh đại diện thất bại: ' + (data.message || 'Lỗi không xác định.'));
+                    }
+                } else {
+                    const errorText = await response.text();
+                    alert('Lỗi server khi tải ảnh lên: ' + response.status + ' ' + errorText);
+                }
+            } catch (error) {
+                console.error('Lỗi khi gửi yêu cầu:', error);
+                alert('Có lỗi mạng hoặc lỗi không mong muốn. Vui lòng thử lại.');
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

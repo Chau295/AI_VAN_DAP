@@ -1,0 +1,280 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Bài thi: {{ subject.name }}{% endblock %}
+
+{% block content %}
+<div id="exam-content" class="h-full">
+    <div class="bg-white shadow-2xl rounded-2xl flex flex-col md:flex-row overflow-hidden h-full">
+        <div class="w-full md:w-2/5 bg-gray-50 border-r border-gray-200 p-6 flex flex-col space-y-6">
+            <div class="flex-shrink-0">
+                <h2 class="text-xl font-bold text-gray-800">Bài thi: {{ subject.name }}</h2>
+                <h3 class="text-md font-semibold text-gray-700 mt-4">Câu hỏi thi</h3>
+                <p id="question-text" class="mt-2 text-gray-600 bg-gray-100 p-4 rounded-lg">
+                    {{ question.question_text }}
+                </p>
+            </div>
+
+            <div class="flex-shrink-0">
+                <h3 class="text-md font-semibold text-gray-700">Thời gian còn lại</h3>
+                <div id="timer" class="mt-2 text-3xl font-mono bg-blue-100 text-blue-700 text-center py-2 rounded-lg transition-colors">
+                    03:00
+                </div>
+            </div>
+
+            <div id="result-container" class="flex-1 overflow-y-auto space-y-4 hidden">
+                <div>
+                    <h3 class="text-md font-semibold text-gray-700">Câu trả lời của bạn (real-time)</h3>
+                    <p id="transcript-text" class="mt-2 text-sm text-gray-600 bg-gray-100 p-3 rounded-lg h-24 overflow-y-auto"></p>
+                </div>
+                <div>
+                    <h3 class="text-md font-semibold text-gray-700">Phân tích đáp án</h3>
+                    <ul id="keyword-analysis-list" class="mt-2 p-4 bg-gray-100 rounded-lg space-y-2 text-sm"></ul>
+                    <p id="coverage-summary" class="text-right font-semibold text-gray-800 text-sm mt-2"></p>
+                </div>
+                <div>
+                    <h3 class="text-md font-semibold text-gray-700">Nhận xét của AI</h3>
+                    <p id="feedback-text" class="mt-2 text-sm text-gray-600 bg-yellow-100 p-3 rounded-lg"></p>
+                </div>
+                <div class="grid grid-cols-2 gap-4 items-center">
+                     <div>
+                        <h3 class="text-md font-semibold text-gray-700">Thời gian làm bài</h3>
+                        <p id="time-taken-display" class="font-semibold text-gray-800 text-lg text-center"></p>
+                    </div>
+                    <div>
+                        <h3 class="text-md font-semibold text-gray-700">Điểm tổng kết</h3>
+                        <div class="bg-green-100 p-3 rounded-lg text-center">
+                            <span class="text-4xl font-bold text-green-700" id="score">N/A</span>
+                            <span class="text-gray-600">/ 10</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="initial-info" class="flex-1 flex items-center justify-center text-center text-gray-400">
+                <p>Kết quả sẽ được hiển thị ở đây sau khi bạn nộp bài.</p>
+            </div>
+
+             <div class="flex-shrink-0 mt-auto">
+                 <a href="{% url 'dashboard' %}" class="w-full text-center block bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg hover:bg-gray-300 transition-colors">
+                    <i class="fas fa-arrow-left mr-2"></i>Quay lại trang chủ
+                </a>
+             </div>
+        </div>
+
+        <div class="w-full md:w-3/5 p-8 flex flex-col items-center justify-center text-center bg-white">
+            <div id="interaction-area" class="">
+                <i class="fas fa-microphone-alt text-5xl text-gray-300"></i>
+                <h2 class="text-2xl font-bold text-gray-800 mt-4">Sẵn sàng bắt đầu</h2>
+                <p class="text-gray-500 mt-2">Nhấn nút bên dưới để bắt đầu ghi âm câu trả lời.</p>
+                <button id="start-btn" class="mt-8 bg-blue-600 text-white font-bold py-3 px-8 rounded-full hover:bg-blue-700 transition-all text-lg shadow-lg">
+                    <i class="fas fa-play mr-2"></i> Bắt đầu trả lời
+                </button>
+            </div>
+
+            <div id="recording-area" class="hidden w-full">
+                <h2 class="text-2xl font-bold text-blue-600 mt-4">Đang ghi âm...</h2>
+                <p class="text-gray-500 mt-2">Hãy nói rõ ràng vào microphone.</p>
+                <button id="stop-btn" class="mt-8 bg-red-600 text-white font-bold py-3 px-8 rounded-full hover:bg-red-700 transition-all text-lg shadow-lg">
+                    <i class="fas fa-stop mr-2"></i> Dừng & Nộp bài
+                </button>
+            </div>
+
+            <div id="grading-area" class="hidden">
+                 <i class="fas fa-spinner fa-spin text-5xl text-gray-400"></i>
+                 <h2 class="text-2xl font-bold text-gray-800 mt-4">Đang chấm điểm...</h2>
+                 <p class="text-gray-500 mt-2">Hệ thống đang phân tích câu trả lời của bạn. Vui lòng chờ.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+{{ subject.subject_code|json_script:"subject_code_data" }}
+{{ question.id|json_script:"question_id_data" }}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const examContent = document.getElementById('exam-content');
+    if (!examContent) return;
+
+    // --- DOM Elements ---
+    const elements = {
+        interactionArea: document.getElementById('interaction-area'),
+        recordingArea: document.getElementById('recording-area'),
+        gradingArea: document.getElementById('grading-area'),
+        resultContainer: document.getElementById('result-container'),
+        initialInfo: document.getElementById('initial-info'),
+        startBtn: document.getElementById('start-btn'),
+        stopBtn: document.getElementById('stop-btn'),
+        timer: document.getElementById('timer'),
+        transcript: document.getElementById('transcript-text'),
+        score: document.getElementById('score'),
+        feedback: document.getElementById('feedback-text'),
+        analysisList: document.getElementById('keyword-analysis-list'),
+        coverageSummary: document.getElementById('coverage-summary'),
+        timeTaken: document.getElementById('time-taken-display'),
+        subjectCode: JSON.parse(document.getElementById('subject_code_data').textContent),
+        questionId: JSON.parse(document.getElementById('question_id_data').textContent),
+    };
+
+    // --- State Variables ---
+    let socket;
+    let mediaRecorder;
+    let timerInterval;
+    const EXAM_DURATION = 180;
+    let finalTimeRemaining = EXAM_DURATION;
+
+    // --- UI Update Functions ---
+    const formatTime = (seconds) => {
+        const minutes = Math.floor(seconds / 60).toString().padStart(2, '0');
+        const secs = (seconds % 60).toString().padStart(2, '0');
+        return `${minutes}:${secs}`;
+    };
+
+    const updateUIState = (state) => {
+        ['interactionArea', 'recordingArea', 'gradingArea'].forEach(area => {
+            elements[area].classList.add('hidden');
+        });
+        if (state) elements[state].classList.remove('hidden');
+    };
+
+    const resetExamUI = () => {
+        clearInterval(timerInterval);
+        elements.timer.textContent = formatTime(EXAM_DURATION);
+        elements.timer.className = 'mt-2 text-3xl font-mono bg-blue-100 text-blue-700 text-center py-2 rounded-lg transition-colors';
+        updateUIState('interactionArea');
+        elements.resultContainer.classList.add('hidden');
+        elements.initialInfo.classList.remove('hidden');
+        if (elements.timeTaken) elements.timeTaken.textContent = '';
+        finalTimeRemaining = EXAM_DURATION;
+    };
+
+    const showResults = (resultData) => {
+        updateUIState(null);
+        elements.initialInfo.classList.add('hidden');
+        elements.resultContainer.classList.remove('hidden');
+
+        let timeTaken = EXAM_DURATION - finalTimeRemaining;
+        elements.timeTaken.textContent = formatTime(timeTaken < 0 ? 0 : timeTaken);
+
+        // DÙNG DỮ LIỆU THẬT TỪ SERVER
+        elements.transcript.textContent = resultData.transcript || "Không nhận dạng được giọng nói.";
+        elements.score.textContent = resultData.final_score || "N/A";
+        elements.feedback.textContent = resultData.feedback || "Không có nhận xét.";
+
+        elements.analysisList.innerHTML = '';
+        const analysisData = resultData.analysis || [];
+        let matchedCount = analysisData.filter(item => item.matched).length;
+        analysisData.forEach(item => {
+            const li = document.createElement('li');
+            li.className = `flex items-center ${item.matched ? 'text-green-600' : 'text-red-500'}`;
+            li.innerHTML = `<i class="fas ${item.matched ? 'fa-check-circle' : 'fa-times-circle'} w-5 mr-2 flex-shrink-0"></i><span>${item.text}</span>`;
+            elements.analysisList.appendChild(li);
+        });
+
+        const percentage = analysisData.length > 0 ? Math.round((matchedCount / analysisData.length) * 100) : 0;
+        elements.coverageSummary.textContent = `Mức độ bao phủ: ${matchedCount}/${analysisData.length} (${percentage}%)`;
+
+        // Gửi kết quả về server để lưu vào database
+        fetch("{% url 'save_result' %}", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: JSON.stringify(resultData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if(data.status === 'success') {
+                console.log('Kết quả đã được lưu thành công!');
+            } else {
+                console.error('Lỗi khi lưu kết quả:', data.message);
+            }
+        });
+    };
+
+    // --- Timer Functions ---
+    const startTimer = () => {
+        let timeLeft = EXAM_DURATION;
+        elements.timer.textContent = formatTime(timeLeft);
+        timerInterval = setInterval(() => {
+            timeLeft--;
+            finalTimeRemaining = timeLeft;
+            elements.timer.textContent = formatTime(timeLeft);
+            if (timeLeft <= 10 && timeLeft > 0) {
+                elements.timer.className = 'mt-2 text-3xl font-mono bg-red-100 text-red-700 text-center py-2 rounded-lg transition-colors';
+            } else if (timeLeft <= 0) {
+                clearInterval(timerInterval);
+                elements.stopBtn.click();
+            }
+        }, 1000);
+    };
+
+    // --- WebSocket and Media Recorder Logic ---
+    const startExam = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
+            // Truyền question_id qua query string
+            const wsPath = `${wsScheme}://${window.location.host}/ws/exam/${elements.subjectCode}/?question_id=${elements.questionId}`;
+            socket = new WebSocket(wsPath);
+
+            socket.onopen = () => {
+                console.log("WebSocket connected.");
+                updateUIState('recordingArea');
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+                mediaRecorder.ondataavailable = event => {
+                    if (event.data.size > 0 && socket.readyState === WebSocket.OPEN) {
+                        socket.send(event.data);
+                    }
+                };
+                mediaRecorder.start(1000); // Gửi dữ liệu mỗi 1 giây
+                startTimer();
+            };
+
+            socket.onmessage = event => {
+                const message = JSON.parse(event.data);
+                if (message.type === 'result') {
+                    if (message.data.error) {
+                        alert(`Lỗi từ server: ${message.data.error}`);
+                        resetExamUI();
+                    } else {
+                        showResults(message.data);
+                    }
+                }
+                if (message.type === 'partial_transcript') {
+                    elements.transcript.textContent = message.data + '...';
+                }
+            };
+
+            socket.onclose = () => console.log("WebSocket disconnected.");
+            socket.onerror = (error) => console.error("WebSocket Error:", error);
+
+        } catch (err) {
+            console.error("Microphone access error:", err);
+            alert("Không thể truy cập microphone. Vui lòng cấp quyền và thử lại.");
+        }
+    };
+
+    const stopExam = () => {
+        clearInterval(timerInterval);
+        if (mediaRecorder?.state === 'recording') {
+            mediaRecorder.stop();
+        }
+        if (socket?.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ 'type': 'end_of_stream' }));
+        }
+        updateUIState('gradingArea');
+    };
+
+    // --- Event Listeners ---
+    elements.startBtn.addEventListener('click', startExam);
+    elements.stopBtn.addEventListener('click', stopExam);
+
+    resetExamUI(); // Thiết lập trạng thái ban đầu
+});
+</script>
+{% endblock %}

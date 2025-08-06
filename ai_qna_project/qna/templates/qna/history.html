@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Lịch sử thi{% endblock %}
+
+{% block content %}
+<div id="history-content" class="content-section">
+    <h2 class="text-3xl font-bold text-gray-800 mb-8">Lịch sử các bài thi</h2>
+    <div class="bg-white p-6 rounded-xl shadow-md">
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Môn học</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ngày thi</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Điểm số</th>
+                        <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Hành động</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    {% for exam in exams %}
+                    <tr>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ exam.subject.name }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ exam.exam_date|date:"d/m/Y H:i" }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-bold {% if exam.score >= 5 %}text-green-600{% else %}text-red-600{% endif %}">{{ exam.score|floatformat:2 }} / 10</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-center space-x-2">
+                            <a href="{% url 'history_detail' exam.id %}" class="text-blue-600 hover:text-blue-900">Xem chi tiết</a>
+                            <button class="text-indigo-600 hover:text-indigo-900">Xin phúc khảo</button>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="4" class="px-6 py-4 text-center text-gray-500">Bạn chưa có lịch sử bài thi nào.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

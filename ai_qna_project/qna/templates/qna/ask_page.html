@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="chat-box">
+    <div class="chat-history">
+        <div class="message bot-message">
+            <div class="message-content">
+                <p>Xin chào! Bạn có thể hỏi tôi bất cứ điều gì về Django.</p>
+            </div>
+        </div>
+
+        {% for conv in conversations %}
+            <div class="message user-message">
+                <div class="message-content">
+                    <p>{{ conv.question_text }}</p>
+                </div>
+            </div>
+            <div class="message bot-message">
+                <div class="message-content">
+                    <p>{{ conv.answer_text }}</p>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+</div>
+<div class="input-area">
+    <form method="post" action="">
+        {% csrf_token %}
+        {{ form.question }}
+        <button type="submit">→</button>
+    </form>
+</div>
+{% endblock %}
