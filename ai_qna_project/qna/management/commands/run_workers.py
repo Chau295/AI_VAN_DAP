@@ -1,5 +1,4 @@
-# ai_qna_project/qna/management/commands/run_workers.py
-
+# qna/management/commands/run_workers.py
 import logging
 import json
 import os
@@ -11,18 +10,18 @@ import torch
 from transformers import AutoTokenizer, AutoModel
 from torch.nn.functional import cosine_similarity
 import google.generativeai as genai
-# THAY ĐỔI 1: Import thư viện mới và ổn định hơn
 from faster_whisper import WhisperModel
 
 from django.core.management.base import BaseCommand
 from django.conf import settings
 from channels.layers import get_channel_layer
 from asgiref.sync import sync_to_async
-from ai_qna_project.qna.models import Question
+from qna.models import Question
 
 logger = logging.getLogger(__name__)
 
-# --- CÁC HÀM XỬ LÝ NLP VÀ AI (giữ nguyên) ---
+
+# --- CÁC HÀM XỬ LÝ NLP VÀ AI (LẤY TỪ NOTEBOOK) ---
 def preprocess_text_vietnamese(text):
     text = text.lower()
     text = normalize('NFC', text)
@@ -91,10 +90,8 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Sử dụng thiết bị: {self.device} với kiểu tính toán {self.compute_type}")
 
-        # --- THAY ĐỔI 2: CÁCH TẢI CÁC MÔ HÌNH ---
         self.stdout.write("Đang tải Whisper model (sử dụng faster-whisper)...")
-        # Sử dụng model "base" cho tốc độ, hoặc "medium" để cân bằng tốc độ/chất lượng
-        self.whisper_model = WhisperModel("base", device=self.device, compute_type=self.compute_type)
+        self.whisper_model = WhisperModel("medium", device=self.device, compute_type=self.compute_type)
         self.stdout.write("✅ Whisper đã sẵn sàng.")
 
         self.stdout.write("Đang tải PhoBERT model...")
@@ -134,11 +131,24 @@ class Command(BaseCommand):
         question_id = message['question_id']
         audio_path = self.audio_files.pop(reply_channel, None)
 
-        if not audio_path:
+        if not audio_path or not os.path.exists(audio_path):
+            logger.warning(f"Không tìm thấy file âm thanh cho kênh {reply_channel}")
             return
 
-        # === THAY ĐỔI 3: CÁCH NHẬN DẠNG GIỌNG NÓI ===
-        logger.info(f"Đang nhận dạng giọng nói từ {audio_path}...")
+        try:
+            file_size = os.path.getsize(audio_path)
+            logger.info(f"File âm thanh {audio_path} có kích thước {file_size} bytes.")
+            if file_size < 1024:  # Nếu file nhỏ hơn 1KB, coi như không hợp lệ
+                logger.warning("File âm thanh quá nhỏ, có thể không có nội dung.")
+                await self.channel_layer.send(reply_channel, {'type': 'exam.result', 'message': {
+                    'error': 'Ghi âm quá ngắn hoặc không có âm thanh. Vui lòng thử lại.'}})
+                os.remove(audio_path)
+                return
+        except OSError as e:
+            logger.error(f"Không thể kiểm tra kích thước file: {e}")
+            return
+
+        logger.info(f"Đang nhận dạng giọng nói từ file: {audio_path}...")
         try:
             segments, _ = await asyncio.to_thread(self.whisper_model.transcribe, audio_path, language="vi")
             transcript_parts = [segment.text for segment in segments]
@@ -149,7 +159,6 @@ class Command(BaseCommand):
         finally:
             if os.path.exists(audio_path):
                 os.remove(audio_path)
-        # === KẾT THÚC THAY ĐỔI ===
 
         if not final_transcript:
             await self.channel_layer.send(reply_channel, {'type': 'exam.result', 'message': {
