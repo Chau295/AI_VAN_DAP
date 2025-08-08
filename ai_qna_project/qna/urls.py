@@ -15,10 +15,12 @@ urlpatterns = [
     path('save_result/', views.save_exam_result, name='save_result'),
     path('complete_session/', views.complete_exam_session, name='complete_session'),
 
-    # Cấu trúc URL Lịch sử mới
+    # Cấu trúc URL Lịch sử
     path('history/', views.history_view, name='history'),
-    path('history/session/<int:session_id>/', views.history_detail_view, name='history_detail'),
-    path('history/result/<int:result_id>/', views.exam_result_detail_view, name='exam_result_detail'),
+
+    # === CÁC URL API MỚI CHO TRANG LỊCH SỬ ===
+    path('api/history/session/<int:session_id>/', views.history_session_detail_api, name='history_session_detail_api'),
+    path('api/history/result/<int:result_id>/', views.history_result_detail_api, name='history_result_detail_api'),
 ]
 
 if settings.DEBUG:

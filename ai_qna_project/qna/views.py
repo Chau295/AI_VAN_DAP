@@ -1,3 +1,5 @@
+# qna/views.py
+
 import random
 import json
 import logging
@@ -11,6 +13,7 @@ from .models import UserProfile, Subject, Question, ExamResult, User, ExamSessio
 from .forms import RegistrationForm
 
 logger = logging.getLogger(__name__)
+
 
 def register_view(request):
     if request.method == 'POST':
@@ -36,9 +39,6 @@ def register_view(request):
 
 @login_required
 def dashboard_view(request):
-    """
-    Hiển thị trang chủ với danh sách các môn thi được lấy động từ database.
-    """
     try:
         user_full_name = request.user.userprofile.full_name or request.user.username
     except UserProfile.DoesNotExist:
@@ -54,23 +54,17 @@ def dashboard_view(request):
 
 @login_required
 def exam_view(request, subject_code):
-    """
-    Hiển thị trang thi:
-    1. Tạo một ExamSession.
-    2. Chọn ngẫu nhiên 3 câu hỏi và gán vào Session.
-    3. Gửi Session và bộ câu hỏi đến template.
-    """
     subject = get_object_or_404(Subject, subject_code=subject_code)
     all_questions = list(subject.questions.all())
 
     num_questions_to_select = 3
     if len(all_questions) < num_questions_to_select:
-        messages.error(request, f"Môn học '{subject.name}' không có đủ {num_questions_to_select} câu hỏi để tạo đề thi.")
+        messages.error(request,
+                       f"Môn học '{subject.name}' không có đủ {num_questions_to_select} câu hỏi để tạo đề thi.")
         return redirect('dashboard')
 
     selected_questions = random.sample(all_questions, num_questions_to_select)
 
-    # Tạo một phiên thi mới
     session = ExamSession.objects.create(user=request.user, subject=subject)
     session.questions.set(selected_questions)
 
@@ -85,15 +79,10 @@ def exam_view(request, subject_code):
 @require_POST
 @login_required
 def save_exam_result(request):
-    """
-    API endpoint để nhận và lưu kết quả thi, sau đó trả về ID của kết quả.
-    """
     try:
         data = json.loads(request.body)
         session = ExamSession.objects.get(pk=data['session_id'], user=request.user)
         question = Question.objects.get(pk=data['question_id'])
-
-        # Tạo đối tượng ExamResult mới
         exam_result = ExamResult.objects.create(
             session=session,
             question=question,
@@ -115,10 +104,6 @@ def save_exam_result(request):
 @require_POST
 @login_required
 def complete_exam_session(request):
-    """
-    API endpoint được gọi khi modal kết quả cuối cùng hiện ra,
-    đánh dấu là bài thi đã hoàn thành và lưu thời gian.
-    """
     try:
         data = json.loads(request.body)
         session = ExamSession.objects.get(pk=data['session_id'], user=request.user)
@@ -134,9 +119,6 @@ def complete_exam_session(request):
 
 @login_required
 def history_view(request):
-    """
-    Hiển thị lịch sử các LẦN THI (ExamSession).
-    """
     exam_sessions = ExamSession.objects.filter(user=request.user, is_completed=True).order_by('-created_at')
     context = {
         'sessions': exam_sessions
@@ -145,10 +127,9 @@ def history_view(request):
 
 
 @login_required
-def history_detail_view(request, session_id):
+def history_session_detail_api(request, session_id):
     """
-    Hiển thị chi tiết một LẦN THI (ExamSession).
-    Bao gồm tất cả câu hỏi trong đề và kết quả (nếu có).
+    API trả về dữ liệu chi tiết của một phiên thi dưới dạng JSON.
     """
     session = get_object_or_404(ExamSession, pk=session_id, user=request.user)
     all_questions_in_session = session.questions.all()
@@ -158,34 +139,43 @@ def history_detail_view(request, session_id):
     for question in all_questions_in_session:
         result = results.get(question.id)
         detailed_questions.append({
-            'question': question,
-            'result': result
+            'question_text': question.question_text,
+            'result_id': result.id if result else None,
+            'score': result.score if result else 0.0,
         })
 
-    context = {
-        'session': session,
-        'detailed_questions': detailed_questions
+    # SỬA LỖI Ở ĐÂY: Thay đổi '%H:%i' thành '%H:%M'
+    completed_at_str = session.completed_at.strftime('%d/%m/%Y %H:%M') if session.completed_at else "Chưa hoàn thành"
+
+    response_data = {
+        'subject_name': session.subject.name,
+        'completed_at': completed_at_str,
+        'average_score': round(session.calculate_average_score(), 2),
+        'detailed_questions': detailed_questions,
+        'is_re_evaluation_allowed': session.is_re_evaluation_allowed(),
     }
-    return render(request, 'qna/history_detail.html', context)
+    return JsonResponse(response_data)
 
 
 @login_required
-def exam_result_detail_view(request, result_id):
+def history_result_detail_api(request, result_id):
     """
-    Hiển thị chi tiết một KẾT QUẢ CÂU TRẢ LỜI (ExamResult) cụ thể.
+    API trả về dữ liệu chi tiết của một câu trả lời dưới dạng JSON.
     """
     exam_result = get_object_or_404(ExamResult, pk=result_id, session__user=request.user)
-    context = {
-        'exam': exam_result
+
+    response_data = {
+        'question_text': exam_result.question.question_text,
+        'transcript': exam_result.transcript,
+        'analysis': exam_result.analysis,
+        'feedback': exam_result.feedback,
+        'score': round(exam_result.score, 2),
     }
-    return render(request, 'qna/exam_result_detail.html', context)
+    return JsonResponse(response_data)
 
 
 @login_required
 def profile_view(request):
-    """
-    Hiển thị trang thông tin cá nhân của người dùng.
-    """
     user_profile, created = UserProfile.objects.get_or_create(user=request.user)
     context = {
         'user_profile': user_profile,
@@ -201,9 +191,6 @@ def profile_view(request):
 @require_POST
 @login_required
 def update_profile_image(request):
-    """
-    API endpoint để xử lý việc tải lên và cập nhật ảnh đại diện.
-    """
     if 'profile_image' in request.FILES:
         user_profile, created = UserProfile.objects.get_or_create(user=request.user)
         user_profile.profile_image = request.FILES['profile_image']
