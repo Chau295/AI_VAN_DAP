@@ -1,3 +1,4 @@
+# ai_qna_project/qna/models.py
 from django.db import models
 from django.utils import timezone
 from django.contrib.auth.models import User
@@ -68,6 +69,23 @@ class ExamSession(models.Model):
             return False
         # Giới hạn phúc khảo trong 10 phút sau khi hoàn thành
         return timezone.now() <= self.completed_at + timedelta(minutes=10)
+
+    def get_re_evaluation_remaining_time(self):
+        """
+        Trả về thời gian phúc khảo còn lại (tính bằng giây).
+        Nếu hết hạn, trả về 0.
+        """
+        if not self.completed_at:
+            return 0
+
+        deadline = self.completed_at + timedelta(minutes=10)
+        now = timezone.now()
+
+        if now >= deadline:
+            return 0
+
+        remaining = deadline - now
+        return int(remaining.total_seconds())
 
     def __str__(self):
         return f"Bài thi môn {self.subject.name} của {self.user.username} ngày {self.created_at.strftime('%d/%m/%Y')}"

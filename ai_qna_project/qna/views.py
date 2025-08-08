@@ -33,7 +33,6 @@ def register_view(request):
                         messages.error(request, f"Lỗi ở trường '{field_label}': {error}")
     else:
         form = RegistrationForm()
-
     return render(request, 'registration/register.html', {'form': form})
 
 
@@ -43,7 +42,6 @@ def dashboard_view(request):
         user_full_name = request.user.userprofile.full_name or request.user.username
     except UserProfile.DoesNotExist:
         user_full_name = request.user.username
-
     subjects = Subject.objects.all()
     context = {
         'user_full_name': user_full_name,
@@ -56,18 +54,14 @@ def dashboard_view(request):
 def exam_view(request, subject_code):
     subject = get_object_or_404(Subject, subject_code=subject_code)
     all_questions = list(subject.questions.all())
-
     num_questions_to_select = 3
     if len(all_questions) < num_questions_to_select:
         messages.error(request,
                        f"Môn học '{subject.name}' không có đủ {num_questions_to_select} câu hỏi để tạo đề thi.")
         return redirect('dashboard')
-
     selected_questions = random.sample(all_questions, num_questions_to_select)
-
     session = ExamSession.objects.create(user=request.user, subject=subject)
     session.questions.set(selected_questions)
-
     context = {
         'subject': subject,
         'session': session,
@@ -101,9 +95,14 @@ def save_exam_result(request):
         return JsonResponse({'status': 'error', 'message': str(e)}, status=400)
 
 
+# === SỬA LỖI Ở HÀM DƯỚI ĐÂY ===
 @require_POST
 @login_required
-def complete_exam_session(request):
+def complete_exam_session(request):  # Thêm 'request' vào đây
+    """
+    API endpoint được gọi khi modal kết quả cuối cùng hiện ra,
+    đánh dấu là bài thi đã hoàn thành và lưu thời gian.
+    """
     try:
         data = json.loads(request.body)
         session = ExamSession.objects.get(pk=data['session_id'], user=request.user)
@@ -111,7 +110,7 @@ def complete_exam_session(request):
             session.completed_at = timezone.now()
             session.is_completed = True
             session.save()
-        return JsonResponse({'status': 'success'})
+        return JsonResponse({'status': 'success', 'completed_at': session.completed_at.isoformat()})
     except Exception as e:
         logger.error(f"Lỗi khi hoàn thành session: {e}")
         return JsonResponse({'status': 'error', 'message': str(e)}, status=400)
@@ -125,6 +124,24 @@ def history_view(request):
     }
     return render(request, 'qna/history.html', context)
 
+# Add this view to your qna/views.py file
+
+@login_required
+def history_detail_view(request, session_id):
+    """
+    Hiển thị trang chi tiết kết quả của một phiên thi đã hoàn thành.
+    This view renders a full HTML page.
+    """
+    # Optimize the query by pre-fetching related results and their questions
+    # to avoid many small database hits in the template.
+    session = get_object_or_404(
+        ExamSession.objects.prefetch_related('results', 'results__question'),
+        pk=session_id,
+        user=request.user
+    )
+
+    # You will need a template named 'history_detail.html' for this view.
+    return render(request, 'qna/history_detail.html', {'session': session})
 
 @login_required
 def history_session_detail_api(request, session_id):
@@ -144,7 +161,6 @@ def history_session_detail_api(request, session_id):
             'score': result.score if result else 0.0,
         })
 
-    # SỬA LỖI Ở ĐÂY: Thay đổi '%H:%i' thành '%H:%M'
     completed_at_str = session.completed_at.strftime('%d/%m/%Y %H:%M') if session.completed_at else "Chưa hoàn thành"
 
     response_data = {
@@ -152,7 +168,7 @@ def history_session_detail_api(request, session_id):
         'completed_at': completed_at_str,
         'average_score': round(session.calculate_average_score(), 2),
         'detailed_questions': detailed_questions,
-        'is_re_evaluation_allowed': session.is_re_evaluation_allowed(),
+        're_evaluation_remaining_seconds': session.get_re_evaluation_remaining_time(),
     }
     return JsonResponse(response_data)
 
@@ -172,6 +188,18 @@ def history_result_detail_api(request, result_id):
         'score': round(exam_result.score, 2),
     }
     return JsonResponse(response_data)
+
+
+@login_required
+def exam_result_detail_view(request, result_id):
+    """
+    Hiển thị trang chi tiết một KẾT QUẢ CÂU TRẢ LỜI (ExamResult) cụ thể.
+    """
+    exam_result = get_object_or_404(ExamResult, pk=result_id, session__user=request.user)
+    context = {
+        'exam': exam_result
+    }
+    return render(request, 'qna/exam_result_detail.html', context)
 
 
 @login_required
