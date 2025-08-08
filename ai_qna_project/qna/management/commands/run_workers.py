@@ -4,6 +4,7 @@ import json
 import os
 import re
 import asyncio
+import subprocess
 from unicodedata import normalize
 
 import torch
@@ -68,20 +69,38 @@ def rephrase_text_with_gemini(text, question_barem, gemini_model):
 
 
 def score_traditional(student_answer, barem_key_points, tokenizer, model, device, threshold=0.6):
+    """
+    Chấm điểm bằng PhoBERT và trả về kết quả chi tiết cho từng ý.
+    """
     student_embedding = get_sentence_embedding(preprocess_text_vietnamese(student_answer), tokenizer, model, device)
     total_score = 0.0
+    detailed_results = []
+
     for kp in barem_key_points:
         kp_embedding = get_sentence_embedding(preprocess_text_vietnamese(kp["text"]), tokenizer, model, device)
         similarity = cosine_similarity(student_embedding, kp_embedding).item()
-        if similarity >= threshold:
-            total_score += kp["weight"]
-    return min(total_score, 10.0)
+
+        is_matched = similarity >= threshold
+        score_achieved = kp["weight"] if is_matched else 0.0
+        total_score += score_achieved
+
+        detailed_results.append({
+            "text": kp["text"],
+            "similarity": round(similarity, 2),
+            "matched": is_matched
+        })
+
+    final_score = min(total_score, 10.0)
+    return final_score, detailed_results
 
 
 def score_with_gemini(student_answer, question_text, barem_key_points, gemini_model):
+    """
+    Chấm điểm bằng Gemini và trả về kết quả dưới dạng JSON.
+    """
     prompt_parts = [
         "Bạn là một chuyên gia chấm điểm câu trả lời vấn đáp. Nhiệm vụ của bạn là chấm điểm câu trả lời của sinh viên dựa trên barem điểm đã cho một cách nghiêm ngặt.",
-        "Đầu ra của bạn PHẢI là một chuỗi JSON hợp lệ có cấu trúc: {\"diem_so\": float, \"phan_hoi\": \"string\", \"phan_tich\": [{\"text\": \"string\", \"matched\": boolean}]}. Không thêm bất kỳ văn bản nào ngoài chuỗi JSON này.",
+        "Đầu ra của bạn PHẢI là một chuỗi JSON hợp lệ có cấu trúc: {{\"diem_so\": float, \"phan_hoi\": \"string\", \"phan_tich\": [{{\"text\": \"string\", \"matched\": boolean}}]}}. Không thêm bất kỳ văn bản nào ngoài chuỗi JSON này.",
         f"--- CÂU HỎI ---",
         f"Câu hỏi: {question_text}",
         f"--- BAREM ĐIỂM ---"
@@ -108,20 +127,38 @@ def score_with_gemini(student_answer, question_text, barem_key_points, gemini_mo
     return {"score": 0.0, "feedback": "Lỗi hệ thống chấm điểm AI.", "analysis": []}
 
 
+def convert_webm_to_wav(webm_path):
+    """
+    Chuyển đổi file âm thanh từ định dạng webm sang wav.
+    """
+    wav_path = webm_path.replace(".webm", ".wav")
+    try:
+        # Lệnh ffmpeg để chuyển đổi, -y để tự động ghi đè file đã có
+        command = ["ffmpeg", "-i", webm_path, "-ac", "1", "-ar", "16000", "-y", wav_path]
+        subprocess.run(command, check=True, capture_output=True, text=True)
+        logger.info(f"Đã chuyển đổi thành công {webm_path} sang {wav_path}")
+        return wav_path
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Lỗi khi chạy ffmpeg: {e.stderr}")
+        return None
+    except FileNotFoundError:
+        logger.error("Lỗi: Lệnh 'ffmpeg' không được tìm thấy. Hãy đảm bảo ffmpeg đã được cài đặt và thêm vào PATH.")
+        return None
+
+
 class Command(BaseCommand):
     help = 'Chạy worker lắng nghe các tác vụ AI từ channel layer'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.channel_layer = get_channel_layer()
-        self.audio_files = {}
+        self.audio_chunks = {}
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.compute_type = "float16" if torch.cuda.is_available() else "int8"
 
         self.stdout.write(f"Sử dụng thiết bị: {self.device} với kiểu tính toán {self.compute_type}")
 
         self.stdout.write("Đang tải Whisper model (sử dụng faster-whisper)...")
-        # === NÂNG CẤP MÔ HÌNH TẠI ĐÂY THEO YÊU CẦU CỦA BẠN ===
         self.whisper_model = WhisperModel("medium", device=self.device, compute_type=self.compute_type)
         self.stdout.write("✅ Whisper đã sẵn sàng.")
 
@@ -152,7 +189,7 @@ class Command(BaseCommand):
                 all_barems = json.load(f)
             for barem in all_barems:
                 if barem['id'] == question_obj.question_id_in_barem:
-                    return barem  # Trả về toàn bộ barem object
+                    return barem
         except Exception as e:
             logger.error(f"Không thể tải barem cho câu hỏi {question_id}: {e}")
         return None
@@ -160,34 +197,39 @@ class Command(BaseCommand):
     async def process_end(self, message):
         reply_channel = message['reply_channel']
         question_id = message['question_id']
-        audio_path = self.audio_files.pop(reply_channel, None)
-
-        if not audio_path or not os.path.exists(audio_path):
+        chunks = self.audio_chunks.pop(reply_channel, [])
+        if not chunks:
+            logger.warning("Không có chunk âm thanh nào để xử lý.")
             return
 
-        try:
-            file_size = os.path.getsize(audio_path)
-            if file_size < 1024:
-                logger.warning("File âm thanh quá nhỏ, có thể không có nội dung.")
-                await self.channel_layer.send(reply_channel, {'type': 'exam.result', 'message': {
-                    'error': 'Ghi âm quá ngắn hoặc không có âm thanh. Vui lòng thử lại.'}})
-                if os.path.exists(audio_path): os.remove(audio_path)
-                return
-        except OSError as e:
-            logger.error(f"Không thể kiểm tra kích thước file: {e}")
+        safe_channel_name = re.sub(r'[^a-zA-Z0-9]', '_', reply_channel)
+        webm_path = os.path.join(settings.BASE_DIR, f'temp_audio_{safe_channel_name}.webm')
+
+        logger.info(f"Đang ghi {len(chunks)} chunk vào file {webm_path}...")
+        with open(webm_path, 'wb') as f:
+            for chunk in chunks:
+                f.write(chunk)
+
+        wav_path = await asyncio.to_thread(convert_webm_to_wav, webm_path)
+        if os.path.exists(webm_path):
+            os.remove(webm_path)
+
+        if not wav_path:
+            await self.channel_layer.send(reply_channel, {'type': 'exam.result', 'message': {
+                'error': 'Lỗi xử lý file âm thanh. Vui lòng thử lại.'}})
             return
 
-        logger.info(f"Đang nhận dạng giọng nói từ file: {audio_path}...")
+        logger.info(f"Đang nhận dạng giọng nói từ file: {wav_path}...")
         try:
-            segments, _ = await asyncio.to_thread(self.whisper_model.transcribe, audio_path, language="vi")
+            segments, _ = await asyncio.to_thread(self.whisper_model.transcribe, wav_path, language="vi")
             transcript_parts = [segment.text for segment in segments]
             raw_transcript = "".join(transcript_parts).strip()
         except Exception as e:
             logger.error(f"Lỗi khi nhận dạng giọng nói: {e}")
             raw_transcript = ""
         finally:
-            if os.path.exists(audio_path):
-                os.remove(audio_path)
+            if os.path.exists(wav_path):
+                os.remove(wav_path)
 
         if not raw_transcript:
             await self.channel_layer.send(reply_channel, {'type': 'exam.result', 'message': {
@@ -212,27 +254,30 @@ class Command(BaseCommand):
         gemini_task = asyncio.to_thread(score_with_gemini, rephrased_transcript, question_barem['question'],
                                         question_barem['key_points'], self.gemini_model)
 
-        traditional_score, gemini_result = await asyncio.gather(traditional_task, gemini_task)
+        (traditional_score, traditional_analysis), gemini_result = await asyncio.gather(traditional_task, gemini_task)
+
+        pho_bert_analysis_map = {item['text']: item for item in traditional_analysis}
+        combined_analysis = []
+        for gemini_item in gemini_result.get('analysis', []):
+            pho_bert_item = pho_bert_analysis_map.get(gemini_item['text'])
+            if pho_bert_item:
+                gemini_item['phoBERT_matched'] = pho_bert_item['matched']
+                gemini_item['phoBERT_similarity'] = pho_bert_item['similarity']
+            combined_analysis.append(gemini_item)
 
         final_score = (gemini_result['score'] * 0.7) + (traditional_score * 0.3)
 
         final_result = {"question_id": question_id, "transcript": rephrased_transcript,
                         "final_score": round(final_score, 2), "feedback": gemini_result.get('feedback', ''),
-                        "analysis": gemini_result.get('analysis', [])}
+                        "analysis": combined_analysis}
 
         await self.channel_layer.send(reply_channel, {'type': 'exam.result', 'message': final_result})
 
     async def process_chunk(self, message):
         reply_channel = message['reply_channel']
-        if reply_channel not in self.audio_files:
-            safe_channel_name = re.sub(r'[^a-zA-Z0-9]', '_', reply_channel)
-            temp_file_path = os.path.join(settings.BASE_DIR, f'temp_audio_{safe_channel_name}.webm')
-            self.audio_files[reply_channel] = temp_file_path
-            with open(temp_file_path, 'wb') as f:
-                f.write(message['audio_chunk'])
-        else:
-            with open(self.audio_files[reply_channel], 'ab') as f:
-                f.write(message['audio_chunk'])
+        if reply_channel not in self.audio_chunks:
+            self.audio_chunks[reply_channel] = []
+        self.audio_chunks[reply_channel].append(message['audio_chunk'])
 
     async def run(self):
         logger.info("Worker đang lắng nghe trên kênh 'asr-tasks'...")

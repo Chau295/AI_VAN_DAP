@@ -57,10 +57,22 @@ class RegistrationForm(forms.Form):
         })
     )
 
+    # === THAY ĐỔI LOGIC KIỂM TRA Ở ĐÂY ===
     def clean_username(self):
         username = self.cleaned_data.get('username')
+
+        # 1. Kiểm tra phải là số
+        if not username.isdigit():
+            raise forms.ValidationError("Mã sinh viên chỉ được chứa các ký tự số.")
+
+        # 2. Kiểm tra độ dài phải bằng 12
+        if len(username) != 12:
+            raise forms.ValidationError("Mã sinh viên phải có đúng 12 ký tự.")
+
+        # 3. Kiểm tra xem đã tồn tại chưa (giữ nguyên)
         if User.objects.filter(username=username).exists():
             raise forms.ValidationError("Mã sinh viên này đã được sử dụng để đăng ký.")
+
         return username
 
     def clean(self):
