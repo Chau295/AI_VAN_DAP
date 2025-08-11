@@ -159,7 +159,7 @@ class Command(BaseCommand):
         self.stdout.write(f"Sử dụng thiết bị: {self.device} với kiểu tính toán {self.compute_type}")
 
         self.stdout.write("Đang tải Whisper model (sử dụng faster-whisper)...")
-        self.whisper_model = WhisperModel("medium", device=self.device, compute_type=self.compute_type)
+        self.whisper_model = WhisperModel("large", device=self.device, compute_type=self.compute_type)
         self.stdout.write("✅ Whisper đã sẵn sàng.")
 
         self.stdout.write("Đang tải PhoBERT model...")
@@ -174,7 +174,7 @@ class Command(BaseCommand):
             if not api_key:
                 raise ValueError("Biến môi trường GOOGLE_API_KEY chưa được thiết lập.")
             genai.configure(api_key=api_key)
-            self.gemini_model = genai.GenerativeModel('gemini-1.5-pro-latest')
+            self.gemini_model = genai.GenerativeModel('gemini-1.5-flash-latest')
             self.stdout.write("✅ Gemini đã sẵn sàng.")
         except Exception as e:
             self.gemini_model = None

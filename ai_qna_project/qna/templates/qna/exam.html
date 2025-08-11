@@ -119,6 +119,8 @@
                 <button id="close-detail-modal-btn" class="text-gray-400 hover:text-gray-600 text-2xl font-bold">&times;</button>
             </div>
             <div id="detail-modal-body" class="p-6 space-y-4 overflow-y-auto"></div>
+            <div id="detail-modal-footer" class="p-6 border-t bg-gray-50 rounded-b-xl flex justify-end">
+                </div>
         </div>
     </div>
 
@@ -164,9 +166,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const finalTotalScoreEl = document.getElementById('final-total-score');
     const confirmFinishModal = document.getElementById('confirm-finish-modal');
     const confirmCompleteModal = document.getElementById('confirm-complete-modal');
-    // === THÊM CÁC ELEMENT CHO MODAL CHI TIẾT ===
     const questionDetailModal = document.getElementById('question-detail-modal');
     const detailModalBody = document.getElementById('detail-modal-body');
+    const detailModalFooter = document.getElementById('detail-modal-footer');
 
     const elements = {
         mainTimer: document.getElementById('main-timer'),
@@ -182,10 +184,10 @@ document.addEventListener('DOMContentLoaded', () => {
         confirmFinishBtn: document.getElementById('confirm-finish-btn'),
         completeExamBtn: document.getElementById('complete-exam-btn'),
         cancelCompleteBtn: document.getElementById('cancel-complete-btn'),
+        closeDetailModalBtn: document.getElementById('close-detail-modal-btn'),
+        // === THÊM LẠI ELEMENT CỦA TIMER PHÚC KHẢO ===
         reEvalTimer: document.getElementById('re-evaluation-timer'),
         reEvalTimerContainer: document.getElementById('re-evaluation-timer-container'),
-        // === THÊM CÁC ELEMENT CHO MODAL CHI TIẾT ===
-        closeDetailModalBtn: document.getElementById('close-detail-modal-btn'),
         subjectCode: JSON.parse(document.getElementById('subject_code_data').textContent),
         sessionId: JSON.parse(document.getElementById('session_id_data').textContent),
     };
@@ -194,11 +196,15 @@ document.addEventListener('DOMContentLoaded', () => {
     let mediaRecorder;
     let mainTimerInterval;
     let reEvalTimerInterval;
-    const TOTAL_EXAM_DURATION = 900; // 15 phút
+    let reEvalTimeLeft = 600;
+    let reEvalAllowed = false;
+
+    const TOTAL_EXAM_DURATION = 900;
 
     // === CÁC HÀM XỬ LÝ ===
 
     const formatTime = (seconds) => {
+        if (seconds < 0) seconds = 0;
         const minutes = Math.floor(seconds / 60).toString().padStart(2, '0');
         const secs = (seconds % 60).toString().padStart(2, '0');
         return `${minutes}:${secs}`;
@@ -211,7 +217,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state) elements[state].classList.remove('hidden');
     };
 
-    // === TÁI BỔ SUNG HÀM HIỂN THỊ CHI TIẾT CÂU HỎI ===
     const showQuestionDetail = (questionData) => {
         const result = questionData.result || { transcript: '', analysis: [], feedback: '', final_score: 0 };
         let analysisHTML = '';
@@ -220,45 +225,37 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         detailModalBody.innerHTML = `
-            <div>
-                <h3 class="text-lg font-semibold text-gray-700 mb-2">Câu hỏi</h3>
-                <p class="text-gray-800 bg-gray-100 p-4 rounded-lg">${questionData.text}</p>
-            </div>
-            <div>
-                <h3 class="text-lg font-semibold text-gray-700 mb-2">Câu trả lời của bạn</h3>
-                <p class="text-gray-600 bg-gray-100 p-4 rounded-lg italic">"${result.transcript || '(Không có nội dung)'}"</p>
-            </div>
-            <div>
-                <h3 class="text-lg font-semibold text-gray-700 mb-2">Phân tích đáp án của AI</h3>
-                <ul class="p-4 bg-gray-50 rounded-lg space-y-2 text-sm">${analysisHTML || '<li>Không có phân tích.</li>'}</ul>
-            </div>
-            <div>
-                <h3 class="text-lg font-semibold text-gray-700 mb-2">Nhận xét của AI</h3>
-                <p class="text-gray-800 bg-yellow-100 p-4 rounded-lg">${result.feedback || '(Không có nhận xét)'}</p>
-            </div>
-            <div>
-                <h3 class="text-lg font-semibold text-gray-700 mb-2">Điểm số</h3>
-                <div class="bg-blue-100 p-4 rounded-lg text-center">
-                    <span class="text-5xl font-bold text-blue-700">${(result.final_score || 0).toFixed(2)}</span>
-                    <span class="text-gray-600 text-xl">/ 10</span>
-                </div>
-            </div>
+            <div><h3 class="text-lg font-semibold text-gray-700 mb-2">Câu hỏi</h3><p class="text-gray-800 bg-gray-100 p-4 rounded-lg">${questionData.text}</p></div>
+            <div><h3 class="text-lg font-semibold text-gray-700 mb-2">Câu trả lời của bạn</h3><p class="text-gray-600 bg-gray-100 p-4 rounded-lg italic">"${result.transcript || '(Không có nội dung)'}"</p></div>
+            <div><h3 class="text-lg font-semibold text-gray-700 mb-2">Phân tích đáp án của AI</h3><ul class="p-4 bg-gray-50 rounded-lg space-y-2 text-sm">${analysisHTML || '<li>Không có phân tích.</li>'}</ul></div>
+            <div><h3 class="text-lg font-semibold text-gray-700 mb-2">Nhận xét của AI</h3><p class="text-gray-800 bg-yellow-100 p-4 rounded-lg">${result.feedback || '(Không có nhận xét)'}</p></div>
+            <div><h3 class="text-lg font-semibold text-gray-700 mb-2">Điểm số</h3><div class="bg-blue-100 p-4 rounded-lg text-center"><span class="text-5xl font-bold text-blue-700">${(result.final_score || 0).toFixed(2)}</span><span class="text-gray-600 text-xl">/ 10</span></div></div>
         `;
+
+        // === CHỈ HIỂN THỊ NÚT PHÚC KHẢO TẠI ĐÂY ===
+        if (reEvalAllowed) {
+            detailModalFooter.innerHTML = `<button class="re-eval-btn bg-indigo-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-indigo-700">Xin phúc khảo</button>`;
+        } else {
+            detailModalFooter.innerHTML = `<p class="text-center w-full font-bold text-red-600">Đã hết thời gian phúc khảo</p>`;
+        }
+
         questionDetailModal.classList.remove('hidden');
     };
 
-
-    const startReEvaluationTimer = (duration) => {
-        let timeLeft = duration;
-        elements.reEvalTimer.textContent = formatTime(timeLeft); // Cập nhật ngay lập tức
+    // === HÀM TIMER NÀY SẼ CẬP NHẬT GIAO DIỆN Ở MODAL CHÍNH ===
+    const startReEvaluationTimer = () => {
+        reEvalAllowed = true;
         reEvalTimerInterval = setInterval(() => {
-            timeLeft--;
-            if (timeLeft >= 0) {
-                elements.reEvalTimer.textContent = formatTime(timeLeft);
+            reEvalTimeLeft--;
+            if (reEvalTimeLeft >= 0) {
+                elements.reEvalTimer.textContent = formatTime(reEvalTimeLeft);
             }
-            if (timeLeft < 0) {
+            if (reEvalTimeLeft < 0) {
+                reEvalAllowed = false;
                 clearInterval(reEvalTimerInterval);
                 elements.reEvalTimerContainer.innerHTML = '<span class="text-sm font-bold text-red-600">Đã hết thời gian phúc khảo</span>';
+
+                // Vô hiệu hóa tất cả các nút phúc khảo (dù nó đang ẩn)
                 document.querySelectorAll('.re-eval-btn').forEach(btn => {
                     btn.disabled = true;
                     btn.classList.add('opacity-50', 'cursor-not-allowed');
@@ -276,7 +273,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = q.result || { final_score: 0, transcript: '(Chưa trả lời)' };
             totalScore += result.final_score || 0;
 
-            // === THÊM LẠI NÚT "XEM CHI TIẾT" ===
             const resultHTML = `
                 <div class="p-4 border rounded-lg">
                     <p class="font-semibold text-gray-800">Câu ${index + 1}: ${q.text}</p>
@@ -284,7 +280,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         <p class="font-bold text-lg">Điểm: <span class="text-blue-600">${result.final_score.toFixed(2)}/10</span></p>
                         <div class="space-x-4">
                             <button class="view-detail-btn text-sm text-blue-600 hover:underline" data-question-id="${q.id}">Xem chi tiết</button>
-                            <button class="re-eval-btn text-sm text-indigo-600 hover:underline">Xin phúc khảo</button>
                         </div>
                     </div>
                 </div>
@@ -303,8 +298,8 @@ document.addEventListener('DOMContentLoaded', () => {
             method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
             body: JSON.stringify({ session_id: elements.sessionId })
         }).then(res => res.json()).then(data => {
-            console.log('Đã đánh dấu hoàn thành bài thi.');
-            startReEvaluationTimer(600); // Bắt đầu đếm ngược 10 phút
+            console.log('Đã đánh dấu hoàn thành bài thi. Bắt đầu tính giờ phúc khảo.');
+            startReEvaluationTimer();
         });
     };
 
@@ -436,7 +431,6 @@ document.addEventListener('DOMContentLoaded', () => {
         confirmCompleteModal.classList.add('hidden');
     });
 
-    // === THÊM SỰ KIỆN ĐỂ MỞ VÀ ĐÓNG MODAL CHI TIẾT ===
     modalBody.addEventListener('click', (event) => {
         if (event.target.classList.contains('view-detail-btn')) {
             const questionId = event.target.dataset.questionId;
@@ -450,7 +444,6 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.closeDetailModalBtn.addEventListener('click', () => {
         questionDetailModal.classList.add('hidden');
     });
-
 
     elements.startBtn.addEventListener('click', startRecording);
     elements.stopBtn.addEventListener('click', stopRecording);
