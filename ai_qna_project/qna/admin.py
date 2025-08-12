@@ -13,17 +13,16 @@ class QuestionAdmin(admin.ModelAdmin):
 
 @admin.register(ExamSession)
 class ExamSessionAdmin(admin.ModelAdmin):
-    list_display = ('user', 'subject', 'created_at', 'is_completed')
+    list_display = ('user', 'subject', 'created_at', 'is_completed', 'calculate_average_score')
     list_filter = ('subject', 'user', 'is_completed')
 
 @admin.register(ExamResult)
 class ExamResultAdmin(admin.ModelAdmin):
-    # SỬA LỖI Ở ĐÂY: Dùng '__' để truy cập các trường của model liên quan
-    list_display = ('get_user', 'get_subject', 'score', 'answered_at')
+    list_display = ('get_user', 'get_subject', 'question', 'score', 'follow_up_score', 'answered_at')
     list_filter = ('session__subject', 'session__user')
-    search_fields = ('session__user__username', 'session__subject__name')
+    search_fields = ('session__user__username', 'session__subject__name', 'question__question_text')
+    readonly_fields = ('answered_at',)
 
-    # Định nghĩa các phương thức để lấy thông tin từ session
     @admin.display(description='Sinh viên', ordering='session__user')
     def get_user(self, obj):
         return obj.session.user

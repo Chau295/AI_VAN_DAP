@@ -59,22 +59,19 @@ class ExamSession(models.Model):
             return 0.0
 
         answered_results = self.results.all()
-        total_score = sum(result.score for result in answered_results)
+        # === CẬP NHẬT CÁCH TÍNH ĐIỂM ===
+        # Điểm cuối cùng của mỗi câu là tổng điểm chính và điểm câu hỏi phụ
+        total_score = sum((result.score + result.follow_up_score) for result in answered_results)
 
-        # Điểm trung bình được tính trên tổng số câu hỏi trong đề (bao gồm cả câu 0 điểm)
+        # Điểm trung bình được tính trên tổng số câu hỏi của phiên thi
         return total_score / total_questions
 
     def is_re_evaluation_allowed(self):
         if not self.completed_at:
             return False
-        # Giới hạn phúc khảo trong 10 phút sau khi hoàn thành
         return timezone.now() <= self.completed_at + timedelta(minutes=10)
 
     def get_re_evaluation_remaining_time(self):
-        """
-        Trả về thời gian phúc khảo còn lại (tính bằng giây).
-        Nếu hết hạn, trả về 0.
-        """
         if not self.completed_at:
             return 0
 
@@ -99,6 +96,12 @@ class ExamResult(models.Model):
     feedback = models.TextField(verbose_name="Nhận xét của AI", null=True, blank=True)
     analysis = models.JSONField(verbose_name="Phân tích chi tiết", null=True)
     answered_at = models.DateTimeField(auto_now_add=True)
+
+    # === THÊM CÁC TRƯỜNG MỚI CHO CÂU HỎI PHỤ ===
+    follow_up_question = models.TextField(verbose_name="Câu hỏi phụ", null=True, blank=True)
+    follow_up_transcript = models.TextField(verbose_name="Nội dung trả lời câu hỏi phụ", null=True, blank=True)
+    follow_up_score = models.FloatField(verbose_name="Điểm câu hỏi phụ", default=0.0)
+    follow_up_feedback = models.TextField(verbose_name="Nhận xét câu hỏi phụ", null=True, blank=True)
 
     def __str__(self):
         return f"Kết quả câu hỏi {self.question.id} của {self.session.user.username}"

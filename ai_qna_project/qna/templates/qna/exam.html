@@ -74,6 +74,21 @@
                      <h2 class="text-2xl font-bold text-gray-800 mt-4">Đang chấm điểm...</h2>
                      <p class="text-gray-500 mt-2">Hệ thống đang phân tích câu trả lời. Vui lòng chờ.</p>
                 </div>
+                <div id="follow-up-area" class="hidden w-full text-left">
+                    <div id="follow-up-feedback" class="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-4 rounded-r-lg">
+                        <p class="font-bold">Nhận xét và Điểm lần 1</p>
+                        <p id="feedback-text-1" class="mt-1 text-sm"></p>
+                        <p id="score-text-1" class="mt-2 font-bold text-lg"></p>
+                    </div>
+                    <h3 class="text-md font-semibold text-gray-700">Câu hỏi phụ:</h3>
+                    <p id="follow-up-question-text" class="mt-2 text-gray-800 bg-gray-100 p-4 rounded-lg"></p>
+                    <p class="text-sm text-center text-gray-500 mt-4">Trả lời câu hỏi trên để có cơ hội cải thiện điểm.</p>
+                    <div class="text-center">
+                        <button id="start-follow-up-btn" class="mt-6 bg-blue-600 text-white font-bold py-3 px-8 rounded-full hover:bg-blue-700">
+                            <i class="fas fa-play mr-2"></i> Trả lời câu hỏi phụ
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -120,7 +135,7 @@
             </div>
             <div id="detail-modal-body" class="p-6 space-y-4 overflow-y-auto"></div>
             <div id="detail-modal-footer" class="p-6 border-t bg-gray-50 rounded-b-xl flex justify-end">
-                </div>
+            </div>
         </div>
     </div>
 
@@ -134,7 +149,6 @@
             </div>
         </div>
     </div>
-
 </div>
 
 {{ subject.subject_code|json_script:"subject_code_data" }}
@@ -151,10 +165,10 @@ document.addEventListener('DOMContentLoaded', () => {
             text: btn.dataset.questionText,
             answered: false,
             result: null,
-            resultId: null
         })),
         currentQuestion: null,
         answeredCount: 0,
+        currentExamResultId: null, // ID để theo dõi câu hỏi phụ
     };
 
     // === CÁC ELEMENT GIAO DIỆN ===
@@ -175,8 +189,13 @@ document.addEventListener('DOMContentLoaded', () => {
         interactionArea: document.getElementById('interaction-area'),
         recordingArea: document.getElementById('recording-area'),
         gradingArea: document.getElementById('grading-area'),
+        followUpArea: document.getElementById('follow-up-area'),
+        feedbackText1: document.getElementById('feedback-text-1'),
+        scoreText1: document.getElementById('score-text-1'),
+        followUpQuestionText: document.getElementById('follow-up-question-text'),
         startBtn: document.getElementById('start-btn'),
         stopBtn: document.getElementById('stop-btn'),
+        startFollowUpBtn: document.getElementById('start-follow-up-btn'),
         questionText: document.getElementById('question-text'),
         backToSelectionBtn: document.getElementById('back-to-selection-btn'),
         finishExamBtn: document.getElementById('finish-exam-btn'),
@@ -185,7 +204,6 @@ document.addEventListener('DOMContentLoaded', () => {
         completeExamBtn: document.getElementById('complete-exam-btn'),
         cancelCompleteBtn: document.getElementById('cancel-complete-btn'),
         closeDetailModalBtn: document.getElementById('close-detail-modal-btn'),
-        // === THÊM LẠI ELEMENT CỦA TIMER PHÚC KHẢO ===
         reEvalTimer: document.getElementById('re-evaluation-timer'),
         reEvalTimerContainer: document.getElementById('re-evaluation-timer-container'),
         subjectCode: JSON.parse(document.getElementById('subject_code_data').textContent),
@@ -211,28 +229,59 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const updateUIState = (state) => {
-        ['interactionArea', 'recordingArea', 'gradingArea'].forEach(area => {
+        ['interactionArea', 'recordingArea', 'gradingArea', 'followUpArea'].forEach(area => {
             elements[area].classList.add('hidden');
         });
         if (state) elements[state].classList.remove('hidden');
     };
 
     const showQuestionDetail = (questionData) => {
-        const result = questionData.result || { transcript: '', analysis: [], feedback: '', final_score: 0 };
+        const result = questionData.result || { transcript: '', analysis: [], feedback: '', final_score: 0, follow_up_score: 0 };
+        const combinedScore = (result.final_score || 0);
+
         let analysisHTML = '';
         (result.analysis || []).forEach(item => {
             analysisHTML += `<li class="flex items-center text-gray-700">${item.matched ? '<i class="fas fa-check-circle text-green-500 w-5 mr-2"></i>' : '<i class="fas fa-times-circle text-red-500 w-5 mr-2"></i>'}<span>${item.text}</span></li>`;
         });
 
+        // Xây dựng HTML cho phần câu hỏi phụ (nếu có)
+        let followUpHTML = '';
+        if (result.follow_up_question) {
+            followUpHTML = `
+                <div class="border-t-2 border-dashed border-gray-300 pt-6 mt-6 space-y-4">
+                    <div>
+                        <h3 class="text-lg font-semibold text-indigo-700 mb-2">Câu hỏi phụ</h3>
+                        <p class="text-gray-800 bg-indigo-50 p-4 rounded-lg">${result.follow_up_question}</p>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-700 mb-2">Câu trả lời câu hỏi phụ</h3>
+                        <p class="text-gray-600 bg-gray-100 p-4 rounded-lg italic">"${result.follow_up_transcript || '(Không có nội dung)'}"</p>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-700 mb-2">Điểm câu hỏi phụ</h3>
+                        <div class="bg-green-100 p-3 rounded-lg">
+                            <span class="text-2xl font-bold text-green-700">+ ${result.follow_up_score.toFixed(2)}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
         detailModalBody.innerHTML = `
-            <div><h3 class="text-lg font-semibold text-gray-700 mb-2">Câu hỏi</h3><p class="text-gray-800 bg-gray-100 p-4 rounded-lg">${questionData.text}</p></div>
-            <div><h3 class="text-lg font-semibold text-gray-700 mb-2">Câu trả lời của bạn</h3><p class="text-gray-600 bg-gray-100 p-4 rounded-lg italic">"${result.transcript || '(Không có nội dung)'}"</p></div>
-            <div><h3 class="text-lg font-semibold text-gray-700 mb-2">Phân tích đáp án của AI</h3><ul class="p-4 bg-gray-50 rounded-lg space-y-2 text-sm">${analysisHTML || '<li>Không có phân tích.</li>'}</ul></div>
-            <div><h3 class="text-lg font-semibold text-gray-700 mb-2">Nhận xét của AI</h3><p class="text-gray-800 bg-yellow-100 p-4 rounded-lg">${result.feedback || '(Không có nhận xét)'}</p></div>
-            <div><h3 class="text-lg font-semibold text-gray-700 mb-2">Điểm số</h3><div class="bg-blue-100 p-4 rounded-lg text-center"><span class="text-5xl font-bold text-blue-700">${(result.final_score || 0).toFixed(2)}</span><span class="text-gray-600 text-xl">/ 10</span></div></div>
+            <div><h3 class="text-lg font-semibold text-gray-700 mb-2">Câu hỏi chính</h3><p class="text-gray-800 bg-gray-100 p-4 rounded-lg">${questionData.text}</p></div>
+            <div><h3 class="text-lg font-semibold text-gray-700 mb-2">Câu trả lời của bạn (Lần 1)</h3><p class="text-gray-600 bg-gray-100 p-4 rounded-lg italic">"${result.transcript || '(Không có nội dung)'}"</p></div>
+            <div><h3 class="text-lg font-semibold text-gray-700 mb-2">Phân tích đáp án (Lần 1)</h3><ul class="p-4 bg-gray-50 rounded-lg space-y-2 text-sm">${analysisHTML || '<li>Không có phân tích.</li>'}</ul></div>
+            <div><h3 class="text-lg font-semibold text-gray-700 mb-2">Nhận xét (Lần 1)</h3><p class="text-gray-800 bg-yellow-100 p-4 rounded-lg">${result.feedback || '(Không có nhận xét)'}</p></div>
+            ${followUpHTML}
+            <div class="mt-6 pt-6 border-t-2 border-blue-500">
+                <h3 class="text-lg font-semibold text-gray-700 mb-2">Tổng điểm cho câu hỏi này</h3>
+                <div class="bg-blue-100 p-4 rounded-lg text-center">
+                    <span class="text-5xl font-bold text-blue-700">${combinedScore.toFixed(2)}</span>
+                    <span class="text-gray-600 text-xl">/ 10</span>
+                </div>
+            </div>
         `;
 
-        // === CHỈ HIỂN THỊ NÚT PHÚC KHẢO TẠI ĐÂY ===
         if (reEvalAllowed) {
             detailModalFooter.innerHTML = `<button class="re-eval-btn bg-indigo-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-indigo-700">Xin phúc khảo</button>`;
         } else {
@@ -242,7 +291,6 @@ document.addEventListener('DOMContentLoaded', () => {
         questionDetailModal.classList.remove('hidden');
     };
 
-    // === HÀM TIMER NÀY SẼ CẬP NHẬT GIAO DIỆN Ở MODAL CHÍNH ===
     const startReEvaluationTimer = () => {
         reEvalAllowed = true;
         reEvalTimerInterval = setInterval(() => {
@@ -255,7 +303,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 clearInterval(reEvalTimerInterval);
                 elements.reEvalTimerContainer.innerHTML = '<span class="text-sm font-bold text-red-600">Đã hết thời gian phúc khảo</span>';
 
-                // Vô hiệu hóa tất cả các nút phúc khảo (dù nó đang ẩn)
                 document.querySelectorAll('.re-eval-btn').forEach(btn => {
                     btn.disabled = true;
                     btn.classList.add('opacity-50', 'cursor-not-allowed');
@@ -270,14 +317,15 @@ document.addEventListener('DOMContentLoaded', () => {
         let totalScore = 0;
 
         examState.questions.forEach((q, index) => {
-            const result = q.result || { final_score: 0, transcript: '(Chưa trả lời)' };
-            totalScore += result.final_score || 0;
+            const result = q.result || { final_score: 0.0, follow_up_score: 0.0 };
+            const combinedScore = (result.final_score || 0.0);
+            totalScore += combinedScore;
 
             const resultHTML = `
                 <div class="p-4 border rounded-lg">
                     <p class="font-semibold text-gray-800">Câu ${index + 1}: ${q.text}</p>
                     <div class="mt-3 flex justify-between items-center">
-                        <p class="font-bold text-lg">Điểm: <span class="text-blue-600">${result.final_score.toFixed(2)}/10</span></p>
+                        <p class="font-bold text-lg">Điểm: <span class="text-blue-600">${combinedScore.toFixed(2)}/10</span></p>
                         <div class="space-x-4">
                             <button class="view-detail-btn text-sm text-blue-600 hover:underline" data-question-id="${q.id}">Xem chi tiết</button>
                         </div>
@@ -303,31 +351,29 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
+    const handleFollowUpRequired = (data) => {
+        examState.currentExamResultId = data.exam_result_id;
+        elements.feedbackText1.textContent = data.feedback_1;
+        elements.scoreText1.textContent = `Điểm lần 1: ${data.score_1.toFixed(2)} / 10.0`;
+        elements.followUpQuestionText.textContent = data.follow_up_question;
+        updateUIState('followUpArea');
+    };
+
     const handleQuestionAnswered = (resultData) => {
         const data = resultData || {};
         const question = examState.questions.find(q => q.id === examState.currentQuestion.id);
         question.answered = true;
         question.result = data;
         examState.answeredCount++;
+        examState.currentExamResultId = null; // Reset lại ID sau khi hoàn thành
 
         const answeredButton = document.querySelector(`[data-question-id="${question.id}"]`);
         answeredButton.disabled = true;
         answeredButton.classList.add('bg-green-100', 'border-green-500', 'cursor-not-allowed', 'opacity-60');
-        answeredButton.innerHTML += '<i class="fas fa-check-circle text-green-500 ml-auto absolute right-6 top-1/2 -translate-y-1/2"></i>';
-        answeredButton.style.position = 'relative';
-
-        fetch("{% url 'save_result' %}", {
-            method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
-            body: JSON.stringify({...data, session_id: elements.sessionId})
-        })
-        .then(response => response.json())
-        .then(apiResponse => {
-            if (apiResponse.status === 'success') {
-                question.resultId = apiResponse.exam_result_id;
-            } else {
-                console.error(`Lỗi khi lưu kết quả câu ${question.id}:`, apiResponse.message);
-            }
-        });
+        if (!answeredButton.querySelector('.fa-check-circle')) {
+            answeredButton.innerHTML += '<i class="fas fa-check-circle text-green-500 ml-auto absolute right-6 top-1/2 -translate-y-1/2"></i>';
+            answeredButton.style.position = 'relative';
+        }
 
         if (examState.answeredCount === examState.questions.length) {
             showFinalResults();
@@ -355,11 +401,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 1000);
     };
 
-    const startRecording = async () => {
+    const startRecording = async (isFollowUp = false) => {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
-            const wsPath = `${wsScheme}://${window.location.host}/ws/exam/${elements.subjectCode}/?question_id=${examState.currentQuestion.id}`;
+            let wsPath = `${wsScheme}://${window.location.host}/ws/exam/${elements.subjectCode}/?`;
+
+            if (isFollowUp && examState.currentExamResultId) {
+                wsPath += `exam_result_id=${examState.currentExamResultId}`;
+            } else {
+                wsPath += `question_id=${examState.currentQuestion.id}`;
+            }
+
             socket = new WebSocket(wsPath);
 
             socket.onopen = () => {
@@ -373,20 +426,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
             socket.onmessage = event => {
                 const message = JSON.parse(event.data);
-                if (message.type === 'result') {
+                if (message.type === 'complete') {
                     handleQuestionAnswered(message.data || {});
+                } else if (message.type === 'follow_up_required') {
+                    handleFollowUpRequired(message.data || {});
                 }
             };
             socket.onclose = () => console.log("WebSocket disconnected.");
             socket.onerror = (error) => console.error("WebSocket Error:", error);
+
         } catch (err) {
+            console.error("Lỗi ghi âm:", err);
             alert("Không thể truy cập microphone. Vui lòng cấp quyền và thử lại.");
+            updateUIState(isFollowUp ? 'followUpArea' : 'interactionArea');
         }
     };
 
     const stopRecording = () => {
-        if (mediaRecorder?.state === 'recording') mediaRecorder.stop();
-        if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ 'type': 'end_of_stream' }));
+        if (mediaRecorder?.state === 'recording') {
+            mediaRecorder.stop();
+            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+        }
+        if (socket?.readyState === WebSocket.OPEN) {
+            const endStreamMessage = { 'type': 'end_of_stream' };
+            if (!examState.currentExamResultId) {
+                 endStreamMessage.session_id = elements.sessionId;
+            }
+            socket.send(JSON.stringify(endStreamMessage));
+        }
         updateUIState('gradingArea');
     };
 
@@ -409,6 +476,7 @@ document.addEventListener('DOMContentLoaded', () => {
         examContent.classList.add('hidden');
         questionSelectionArea.classList.remove('hidden');
         examState.currentQuestion = null;
+        examState.currentExamResultId = null;
     });
 
     elements.finishExamBtn.addEventListener('click', () => {
@@ -445,7 +513,8 @@ document.addEventListener('DOMContentLoaded', () => {
         questionDetailModal.classList.add('hidden');
     });
 
-    elements.startBtn.addEventListener('click', startRecording);
+    elements.startBtn.addEventListener('click', () => startRecording(false));
+    elements.startFollowUpBtn.addEventListener('click', () => startRecording(true));
     elements.stopBtn.addEventListener('click', stopRecording);
 
     startMainTimer();
