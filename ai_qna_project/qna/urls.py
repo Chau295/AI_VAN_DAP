@@ -1,27 +1,32 @@
 # ai_qna_project/qna/urls.py
-from django.urls import path
-from . import views
 from django.conf import settings
 from django.conf.urls.static import static
+from django.urls import path
+from . import views
+
+# (khuyến nghị) nếu bạn include với namespace: app_name = "qna"
 
 urlpatterns = [
-    path('', views.dashboard_view, name='dashboard'),
+    path('dashboard/', views.dashboard_view, name='dashboard'),
+    path('exam_page/<str:subject_code>/', views.exam_view, name='exam_page'),
+
     path('profile/', views.profile_view, name='profile'),
-    path('exam/<str:subject_code>/', views.exam_view, name='exam_page'),
-    path('register/', views.register_view, name='register'),
+    path('profile/update-image/', views.update_profile_image, name='update_profile_image'),
 
-    # URLs for APIs
-    path('update_image/', views.update_profile_image, name='update_profile_image'),
-    path('save_result/', views.save_exam_result, name='save_result'),
-    path('complete_session/', views.complete_exam_session, name='complete_session'),
-    path('api/history/session/<int:session_id>/', views.history_session_detail_api, name='history_session_detail_api'),
-    path('api/history/result/<int:result_id>/', views.history_result_detail_api, name='history_result_detail_api'),
-
-    # URLs for History Pages
     path('history/', views.history_view, name='history'),
-    path('history/session/<int:session_id>/', views.history_detail_view, name='history_detail'),
-    # === THÊM DÒNG NÀY ĐỂ SỬA LỖI ===
-    path('history/result/<int:result_id>/', views.exam_result_detail_view, name='exam_result_detail'),
+    path('history/<int:session_id>/', views.history_detail_view, name='history_detail'),
+
+    # APIs
+    path('api/save_exam_result/', views.save_exam_result, name='save_exam_result'),
+    path('api/save_supplementary_result/', views.save_supplementary_result, name='save_supplementary_result'),
+    path('api/get_supplementary/<int:session_id>/', views.get_supplementary_for_session,
+         name='get_supplementary_for_session'),
+    path('api/finalize_session/<int:session_id>/', views.finalize_session_view, name='finalize_session'),
+
+    # Legacy (giữ nếu nơi khác còn dùng)
+    path('api/supplementary/<int:session_id>/', views.get_supplementary_questions_api,
+         name='get_supplementary_questions_api'),
+    path('api/supplementary/random/', views.get_supplementary_questions, name='get_supplementary_questions'),
 ]
 
 if settings.DEBUG:

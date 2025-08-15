@@ -1,10 +1,7 @@
 # ai_qna_project/qna/models.py
 from django.db import models
-from django.utils import timezone
 from django.contrib.auth.models import User
-from django.db.models import Avg
-from datetime import timedelta
-
+from django.utils import timezone
 
 class Conversation(models.Model):
     question_text = models.CharField(max_length=255)
@@ -13,7 +10,6 @@ class Conversation(models.Model):
 
     def __str__(self):
         return self.question_text
-
 
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
@@ -25,7 +21,6 @@ class UserProfile(models.Model):
     def __str__(self):
         return self.user.username
 
-
 class Subject(models.Model):
     name = models.CharField(max_length=255, verbose_name="Tên môn học")
     subject_code = models.CharField(max_length=20, unique=True, verbose_name="Mã môn học")
@@ -34,59 +29,27 @@ class Subject(models.Model):
     def __str__(self):
         return self.name
 
-
 class Question(models.Model):
     subject = models.ForeignKey(Subject, on_delete=models.CASCADE, related_name="questions", verbose_name="Môn học")
     question_text = models.TextField(verbose_name="Nội dung câu hỏi")
     question_id_in_barem = models.CharField(max_length=20, verbose_name="ID câu hỏi trong tệp barem",
                                             help_text="Ví dụ: Q1, Q2...")
+    is_supplementary = models.BooleanField(default=False, verbose_name="Là câu hỏi phụ")
 
     def __str__(self):
         return f"{self.subject.subject_code} - {self.question_text[:50]}..."
 
-
 class ExamSession(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='exam_sessions')
     subject = models.ForeignKey(Subject, on_delete=models.CASCADE)
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Ngày thi")
-    completed_at = models.DateTimeField(null=True, blank=True, verbose_name="Thời gian hoàn thành")
     questions = models.ManyToManyField(Question, related_name='exam_sessions')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Ngày thi")
     is_completed = models.BooleanField(default=False)
-
-    def calculate_average_score(self):
-        total_questions = self.questions.count()
-        if not total_questions:
-            return 0.0
-
-        answered_results = self.results.all()
-        # === CẬP NHẬT CÁCH TÍNH ĐIỂM ===
-        # Điểm cuối cùng của mỗi câu là tổng điểm chính và điểm câu hỏi phụ
-        total_score = sum((result.score + result.follow_up_score) for result in answered_results)
-
-        # Điểm trung bình được tính trên tổng số câu hỏi của phiên thi
-        return total_score / total_questions
-
-    def is_re_evaluation_allowed(self):
-        if not self.completed_at:
-            return False
-        return timezone.now() <= self.completed_at + timedelta(minutes=10)
-
-    def get_re_evaluation_remaining_time(self):
-        if not self.completed_at:
-            return 0
-
-        deadline = self.completed_at + timedelta(minutes=10)
-        now = timezone.now()
-
-        if now >= deadline:
-            return 0
-
-        remaining = deadline - now
-        return int(remaining.total_seconds())
+    completed_at = models.DateTimeField(null=True, blank=True, verbose_name="Thời gian hoàn thành")
+    final_score = models.FloatField(null=True, blank=True)
 
     def __str__(self):
         return f"Bài thi môn {self.subject.name} của {self.user.username} ngày {self.created_at.strftime('%d/%m/%Y')}"
-
 
 class ExamResult(models.Model):
     session = models.ForeignKey(ExamSession, on_delete=models.CASCADE, related_name='results')
@@ -94,14 +57,22 @@ class ExamResult(models.Model):
     transcript = models.TextField(verbose_name="Nội dung trả lời")
     score = models.FloatField(verbose_name="Điểm số")
     feedback = models.TextField(verbose_name="Nhận xét của AI", null=True, blank=True)
-    analysis = models.JSONField(verbose_name="Phân tích chi tiết", null=True)
+    analysis = models.JSONField(verbose_name="Phân tích chi tiết", null=True, blank=True)
     answered_at = models.DateTimeField(auto_now_add=True)
-
-    # === THÊM CÁC TRƯỜNG MỚI CHO CÂU HỎI PHỤ ===
-    follow_up_question = models.TextField(verbose_name="Câu hỏi phụ", null=True, blank=True)
-    follow_up_transcript = models.TextField(verbose_name="Nội dung trả lời câu hỏi phụ", null=True, blank=True)
-    follow_up_score = models.FloatField(verbose_name="Điểm câu hỏi phụ", default=0.0)
-    follow_up_feedback = models.TextField(verbose_name="Nhận xét câu hỏi phụ", null=True, blank=True)
 
     def __str__(self):
         return f"Kết quả câu hỏi {self.question.id} của {self.session.user.username}"
+
+class SupplementaryResult(models.Model):
+    """Lưu kết quả cho một câu hỏi phụ."""
+    session = models.ForeignKey(ExamSession, on_delete=models.CASCADE, related_name='supplementary_results')
+    question_text = models.TextField()
+    transcript = models.TextField(blank=True, null=True)
+    score = models.FloatField(default=0.0)
+    max_score = models.FloatField(default=1.0)
+    feedback = models.TextField(blank=True, null=True)
+    analysis = models.JSONField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Supplementary result for {self.session.user.username} - Score: {self.score}/{self.max_score}"

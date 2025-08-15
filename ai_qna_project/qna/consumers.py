@@ -1,102 +1,92 @@
 # qna/consumers.py
 import json
-import logging
 from channels.generic.websocket import AsyncWebsocketConsumer
-from channels.layers import get_channel_layer
 from asgiref.sync import sync_to_async
-from .models import Question, ExamResult
+from django.contrib.auth import get_user_model
+from .models import ExamSession
 
-logger = logging.getLogger(__name__)
+User = get_user_model()
 
 
 class ExamConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        self.user = self.scope["user"]
-        if not self.user.is_authenticated:
-            await self.close()
+        # Ưu tiên lấy session_id từ URL path (kwargs)
+        path_session_id = self.scope.get('url_route', {}).get('kwargs', {}).get('session_id')
+
+        if path_session_id:
+            self.session_id = str(path_session_id)
+        else:
+            # Nếu không có trong path, quay lại lấy từ query string
+            query_string = self.scope['query_string'].decode()
+            params = dict(q.split('=') for q in query_string.split('&') if '=' in q)
+            self.session_id = params.get('session_id')
+
+        if not self.session_id:
+            await self.close(code=4001)
             return
 
-        query_string = self.scope['query_string'].decode()
-        params = dict(q.split('=') for q in query_string.split('&') if '=' in q)
+        try:
+            self.session = await sync_to_async(ExamSession.objects.select_related('user').get)(pk=self.session_id)
+            self.user = self.session.user
 
-        self.question_id = params.get('question_id')
-        # Lấy exam_result_id cho các câu hỏi phụ
-        self.exam_result_id = params.get('exam_result_id')
+            self.room_group_name = f'exam_{self.session_id}'
+            self.reply_channel = self.channel_name  # Dùng làm khóa cho worker
 
-        # Logic xác thực: Phải có question_id hoặc exam_result_id
-        if not self.question_id and not self.exam_result_id:
-            logger.error(f"User {self.user.username} connected with no question_id or exam_result_id.")
-            await self.close()
-            return
+            await self.channel_layer.group_add(
+                self.room_group_name,
+                self.channel_name
+            )
+            await self.accept()
+            print(f"User {self.user.username} connected for session {self.session_id}.")
 
-        # Nếu là câu hỏi phụ, xác thực exam_result_id
-        if self.exam_result_id and not await self.is_valid_exam_result(self.exam_result_id):
-            logger.error(
-                f"User {self.user.username} tried to connect with invalid exam_result_id: {self.exam_result_id}")
-            await self.close()
-            return
-
-        self.subject_code = self.scope['url_route']['kwargs']['subject_code']
-        self.room_group_name = f'exam_{self.user.id}_{self.subject_code}'
-
-        await self.channel_layer.group_add(self.room_group_name, self.channel_name)
-        await self.accept()
-        logger.info(
-            f"User {self.user.username} connected for exam {self.subject_code}. Q_ID: {self.question_id}, Result_ID: {self.exam_result_id}")
+        except ExamSession.DoesNotExist:
+            await self.close(code=4004)
 
     async def disconnect(self, close_code):
         if hasattr(self, 'room_group_name'):
-            await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
-        logger.info(f"User {self.user.username} disconnected.")
+            await self.channel_layer.group_discard(
+                self.room_group_name,
+                self.channel_name
+            )
+            print(f"User disconnected from session {self.session_id}.")
 
     async def receive(self, text_data=None, bytes_data=None):
-        channel_layer = get_channel_layer()
+        # Xử lý dữ liệu nhị phân (audio blob) trước
+        if bytes_data:
+            # Chuyển tiếp audio blob đến worker dưới dạng 'asr.chunk'
+            await self.channel_layer.send('asr-tasks', {
+                'type': 'asr.chunk',
+                'reply_channel': self.reply_channel,
+                'audio_chunk': bytes_data,
+            })
+            return
 
+        # Xử lý dữ liệu văn bản (lệnh JSON)
         if text_data:
             try:
                 data = json.loads(text_data)
-                if data.get('type') == 'end_of_stream':
-                    logger.info(f"Received end_of_stream from {self.user.username}.")
+                task_type = data.get('type')
 
-                    # Phân biệt tác vụ cho câu hỏi chính và câu hỏi phụ
-                    if self.exam_result_id:
-                        # Đây là câu trả lời cho câu hỏi phụ
-                        await channel_layer.send('asr-tasks', {
-                            'type': 'asr.process.follow_up',
-                            'reply_channel': self.channel_name,
-                            'exam_result_id': self.exam_result_id
-                        })
-                    else:
-                        # Đây là câu trả lời cho câu hỏi chính
-                        await channel_layer.send('asr-tasks', {
-                            'type': 'asr.process.end',
-                            'reply_channel': self.channel_name,
-                            'question_id': self.question_id,
-                            'session_id': data.get('session_id')
-                        })
-                    return
+                # Chỉ chuyển tiếp các lệnh điều khiển stream
+                if task_type in ['asr.stream.start', 'asr.stream.end']:
+                    message = {
+                        'reply_channel': self.reply_channel,
+                        **data  # Gửi toàn bộ nội dung message
+                    }
+                    await self.channel_layer.send('asr-tasks', message)
             except json.JSONDecodeError:
-                pass
-
-        if bytes_data:
-            # Gửi chunk âm thanh đến worker
-            task_type = 'asr.process.follow_up_chunk' if self.exam_result_id else 'asr.process.chunk'
-            await channel_layer.send('asr-tasks', {
-                'type': task_type,
-                'audio_chunk': bytes_data,
-                'reply_channel': self.channel_name
-            })
+                print(f"Received invalid JSON from client: {text_data}")
 
     async def exam_result(self, event):
-        # Gửi kết quả cuối cùng hoặc yêu cầu câu hỏi phụ về client
-        await self.send(text_data=json.dumps(event['message']))
-        logger.info(f"Sent result to {self.user.username}. Status: {event['message'].get('type')}")
+        message = event['message']
+        await self.send(text_data=json.dumps({
+            'type': 'exam.result',
+            'message': message
+        }))
 
-    @sync_to_async
-    def is_valid_question(self, question_id):
-        return Question.objects.filter(pk=question_id).exists()
-
-    @sync_to_async
-    def is_valid_exam_result(self, result_id):
-        # Đảm bảo ExamResult tồn tại và thuộc về user hiện tại
-        return ExamResult.objects.filter(pk=result_id, session__user=self.user).exists()
+    async def exam_error(self, event):
+        message = event['message']
+        await self.send(text_data=json.dumps({
+            'type': 'exam.error',
+            'message': message
+        }))

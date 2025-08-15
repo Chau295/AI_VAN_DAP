@@ -1,231 +1,333 @@
-# qna/views.py
+# ai_qna_project/qna/views.py
+from __future__ import annotations
 
-import random
 import json
-import logging
-from django.shortcuts import render, redirect, get_object_or_404
+import random
+from typing import Tuple, Optional
+
 from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
-from django.views.decorators.http import require_POST
-from django.contrib import messages
+from django.core.exceptions import PermissionDenied
+from django.http import (
+    JsonResponse,
+    HttpRequest,
+    HttpResponse,
+    HttpResponseBadRequest,
+)
+from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
-from .models import UserProfile, Subject, Question, ExamResult, User, ExamSession
-from .forms import RegistrationForm
+from django.views.decorators.http import require_POST, require_GET
 
-logger = logging.getLogger(__name__)
+from .models import (
+    Subject,
+    Question,
+    ExamSession,
+    ExamResult,
+    SupplementaryResult,
+    UserProfile,  # dùng cho cập nhật avatar
+)
 
+# ===========================
+# Helpers
+# ===========================
 
-def register_view(request):
-    if request.method == 'POST':
-        form = RegistrationForm(request.POST)
-        if form.is_valid():
-            user = form.save()
-            username = form.cleaned_data.get('username')
-            messages.success(request, f'Tài khoản {username} đã được tạo thành công! Vui lòng đăng nhập.')
-            return redirect('login')
-        else:
-            for field, errors in form.errors.items():
-                for error in errors:
-                    if field == '__all__':
-                        messages.error(request, error)
-                    else:
-                        field_label = form.fields[field].label
-                        messages.error(request, f"Lỗi ở trường '{field_label}': {error}")
-    else:
-        form = RegistrationForm()
-    return render(request, 'registration/register.html', {'form': form})
-
-
-@login_required
-def dashboard_view(request):
+def _json_body(request: HttpRequest) -> dict:
+    """Safe JSON loader for request.body; returns {} if empty/invalid."""
     try:
-        user_full_name = request.user.userprofile.full_name or request.user.username
-    except UserProfile.DoesNotExist:
-        user_full_name = request.user.username
-    subjects = Subject.objects.all()
-    context = {
-        'user_full_name': user_full_name,
-        'subjects': subjects,
-    }
-    return render(request, 'qna/dashboard.html', context)
+        if request.body:
+            return json.loads(request.body.decode("utf-8"))
+    except Exception:
+        pass
+    return {}
 
+def _ensure_owner(session: ExamSession, user) -> None:
+    if session.user_id != getattr(user, "id", None):
+        raise PermissionDenied("Bạn không có quyền với phiên thi này.")
 
-@login_required
-def exam_view(request, subject_code):
-    subject = get_object_or_404(Subject, subject_code=subject_code)
-    all_questions = list(subject.questions.all())
-    num_questions_to_select = 3
-    if len(all_questions) < num_questions_to_select:
-        messages.error(request,
-                       f"Môn học '{subject.name}' không có đủ {num_questions_to_select} câu hỏi để tạo đề thi.")
-        return redirect('dashboard')
-    selected_questions = random.sample(all_questions, num_questions_to_select)
-    session = ExamSession.objects.create(user=request.user, subject=subject)
-    session.questions.set(selected_questions)
-    context = {
-        'subject': subject,
-        'session': session,
-        'selected_questions': selected_questions,
-    }
-    return render(request, 'qna/exam.html', context)
-
-
-@require_POST
-@login_required
-def save_exam_result(request):
-    try:
-        data = json.loads(request.body)
-        session = ExamSession.objects.get(pk=data['session_id'], user=request.user)
-        question = Question.objects.get(pk=data['question_id'])
-        exam_result = ExamResult.objects.create(
-            session=session,
-            question=question,
-            transcript=data['transcript'],
-            score=data['final_score'],
-            feedback=data.get('feedback', ''),
-            analysis=data.get('analysis', [])
-        )
-        return JsonResponse({
-            'status': 'success',
-            'message': 'Kết quả đã được lưu thành công.',
-            'exam_result_id': exam_result.id
-        })
-    except Exception as e:
-        logger.error(f"Lỗi khi lưu kết quả thi cho user {request.user.username}: {e}")
-        return JsonResponse({'status': 'error', 'message': str(e)}, status=400)
-
-
-# === SỬA LỖI Ở HÀM DƯỚI ĐÂY ===
-@require_POST
-@login_required
-def complete_exam_session(request):  # Thêm 'request' vào đây
+def _compute_scores(session: ExamSession) -> Tuple[Optional[float], float, float]:
     """
-    API endpoint được gọi khi modal kết quả cuối cùng hiện ra,
-    đánh dấu là bài thi đã hoàn thành và lưu thời gian.
+    Trả về bộ 3:
+      - main_avg: điểm trung bình phần chính (None nếu chưa có câu nào)
+      - supp_sum: tổng điểm cộng từ câu phụ
+      - final_total: tổng điểm sau khi cộng câu phụ, giới hạn tối đa 10.0
     """
-    try:
-        data = json.loads(request.body)
-        session = ExamSession.objects.get(pk=data['session_id'], user=request.user)
-        if not session.completed_at:
-            session.completed_at = timezone.now()
-            session.is_completed = True
-            session.save()
-        return JsonResponse({'status': 'success', 'completed_at': session.completed_at.isoformat()})
-    except Exception as e:
-        logger.error(f"Lỗi khi hoàn thành session: {e}")
-        return JsonResponse({'status': 'error', 'message': str(e)}, status=400)
+    mains = list(ExamResult.objects.filter(session=session).only("score"))
+    if not mains:
+        # Chưa có phần chính => coi như 0
+        supp_sum = sum(sr.score or 0.0 for sr in SupplementaryResult.objects
+                       .filter(session=session).only("score"))
+        return None, supp_sum, 0.0
 
+    main_avg = sum((er.score or 0.0) for er in mains) / len(mains)
+    supp_sum = sum((sr.score or 0.0) for sr in SupplementaryResult.objects
+                   .filter(session=session).only("score"))
+    final_total = min(10.0, main_avg + supp_sum)
+    return main_avg, supp_sum, final_total
+
+# ===========================
+# Pages
+# ===========================
 
 @login_required
-def history_view(request):
-    exam_sessions = ExamSession.objects.filter(user=request.user, is_completed=True).order_by('-created_at')
-    context = {
-        'sessions': exam_sessions
-    }
-    return render(request, 'qna/history.html', context)
-
-# Add this view to your qna/views.py file
-
-@login_required
-def history_detail_view(request, session_id):
-    """
-    Hiển thị trang chi tiết kết quả của một phiên thi đã hoàn thành.
-    This view renders a full HTML page.
-    """
-    # Optimize the query by pre-fetching related results and their questions
-    # to avoid many small database hits in the template.
-    session = get_object_or_404(
-        ExamSession.objects.prefetch_related('results', 'results__question'),
-        pk=session_id,
-        user=request.user
+def dashboard_view(request: HttpRequest) -> HttpResponse:
+    """Trang chính đơn giản: liệt kê môn học & lịch sử gần đây."""
+    subjects = Subject.objects.all().order_by("name")
+    recent_sessions = (
+        ExamSession.objects.filter(user=request.user)
+        .select_related("subject")
+        .order_by("-created_at")[:10]
     )
-
-    # You will need a template named 'history_detail.html' for this view.
-    return render(request, 'qna/history_detail.html', {'session': session})
-
-@login_required
-def history_session_detail_api(request, session_id):
-    """
-    API trả về dữ liệu chi tiết của một phiên thi dưới dạng JSON.
-    """
-    session = get_object_or_404(ExamSession, pk=session_id, user=request.user)
-    all_questions_in_session = session.questions.all()
-    results = {result.question_id: result for result in session.results.all()}
-
-    detailed_questions = []
-    for question in all_questions_in_session:
-        result = results.get(question.id)
-        detailed_questions.append({
-            'question_text': question.question_text,
-            'result_id': result.id if result else None,
-            'score': result.score if result else 0.0,
-        })
-
-    completed_at_str = session.completed_at.strftime('%d/%m/%Y %H:%M') if session.completed_at else "Chưa hoàn thành"
-
-    response_data = {
-        'subject_name': session.subject.name,
-        'completed_at': completed_at_str,
-        'average_score': round(session.calculate_average_score(), 2),
-        'detailed_questions': detailed_questions,
-        're_evaluation_remaining_seconds': session.get_re_evaluation_remaining_time(),
-    }
-    return JsonResponse(response_data)
-
+    return render(request, "qna/dashboard.html", {
+        "subjects": subjects,
+        "recent_sessions": recent_sessions,
+    })
 
 @login_required
-def history_result_detail_api(request, result_id):
-    """
-    API trả về dữ liệu chi tiết của một câu trả lời dưới dạng JSON.
-    """
-    exam_result = get_object_or_404(ExamResult, pk=result_id, session__user=request.user)
-
-    response_data = {
-        'question_text': exam_result.question.question_text,
-        'transcript': exam_result.transcript,
-        'analysis': exam_result.analysis,
-        'feedback': exam_result.feedback,
-        'score': round(exam_result.score, 2),
-    }
-    return JsonResponse(response_data)
-
+def profile_view(request: HttpRequest) -> HttpResponse:
+    return render(request, "qna/profile.html")
 
 @login_required
-def exam_result_detail_view(request, result_id):
-    """
-    Hiển thị trang chi tiết một KẾT QUẢ CÂU TRẢ LỜI (ExamResult) cụ thể.
-    """
-    exam_result = get_object_or_404(ExamResult, pk=result_id, session__user=request.user)
-    context = {
-        'exam': exam_result
-    }
-    return render(request, 'qna/exam_result_detail.html', context)
-
+def history_view(request: HttpRequest) -> HttpResponse:
+    sessions = (
+        ExamSession.objects.filter(user=request.user)
+        .select_related("subject")
+        .order_by("-created_at")
+    )
+    # Gắn thuộc tính động cho template
+    for s in sessions:
+        m, supp, t = _compute_scores(s)
+        s.main_avg = m or 0.0
+        s.supp_sum = supp or 0.0
+        s.final_total = t or 0.0
+    return render(request, "qna/history.html", {"sessions": sessions})
 
 @login_required
-def profile_view(request):
-    user_profile, created = UserProfile.objects.get_or_create(user=request.user)
-    context = {
-        'user_profile': user_profile,
-        'full_name': user_profile.full_name or request.user.username,
-        'student_id': user_profile.student_id or "Chưa cập nhật",
-        'class_name': user_profile.class_name or "Chưa cập nhật",
-        'email': request.user.email or "Chưa cập nhật",
-        'faculty': 'Khoa Hệ thống thông tin',
-    }
-    return render(request, 'qna/profile.html', context)
+def history_detail_view(request: HttpRequest, session_id: int) -> HttpResponse:
+    session = get_object_or_404(
+        ExamSession.objects.select_related("subject", "user"),
+        pk=session_id,
+    )
+    _ensure_owner(session, request.user)
 
+    results = (
+        ExamResult.objects.filter(session=session)
+        .select_related("question")
+        .order_by("question_id")
+    )
+    supp_results = SupplementaryResult.objects.filter(session=session).order_by("created_at")
 
+    main_avg, supp_sum, final_total = _compute_scores(session)
+
+    return render(request, "qna/history_detail.html", {
+        "session": session,
+        "results": results,
+        "supp_results": supp_results,
+        "main_avg": main_avg,        # có thể là None; template dùng |default:0 nếu cần
+        "supp_sum": supp_sum,
+        "final_total": final_total,
+    })
+
+# ===========================
+# Exam flow (luồng mới)
+# ===========================
+
+@login_required
+def exam_view(request: HttpRequest, subject_code: str) -> HttpResponse:
+    """
+    ✅ LUỒNG MỚI:
+    - Chỉ chọn & hiển thị 3 câu hỏi CHÍNH.
+    - Đồng thời gửi xuống BAREM (JSON) chứa pool câu hỏi chính còn lại để client random 2 câu phụ.
+    """
+    subject = get_object_or_404(Subject, subject_code=subject_code)
+
+    main_pool_qs = Question.objects.filter(subject=subject, is_supplementary=False)
+
+    # Luôn 3 câu chính
+    selected_questions = list(main_pool_qs.order_by("?")[:3])
+
+    # Tạo session và gắn câu hỏi
+    session = ExamSession.objects.create(user=request.user, subject=subject)
+    if selected_questions:
+        session.questions.set(selected_questions)
+
+    # ✅ BAREM cho câu hỏi phụ: lấy từ "câu hỏi chính còn lại" (loại trừ 3 câu đã chọn)
+    remaining_main = main_pool_qs.exclude(id__in=[q.id for q in selected_questions]).values("id", "question_text")
+    barem = [{"id": r["id"], "question": r["question_text"]} for r in remaining_main]
+
+    return render(request, "qna/exam.html", {
+        "subject": subject,
+        "selected_questions": selected_questions,
+        "session": session,
+        "barem_json": json.dumps(barem, ensure_ascii=False),  # client dùng window.__BAREM__ để random 2 câu phụ
+    })
+
+# ===========================
+# APIs used by exam flow
+# ===========================
+
+@login_required
 @require_POST
+def save_exam_result(request: HttpRequest) -> JsonResponse:
+    """
+    Lưu kết quả một câu hỏi CHÍNH.
+    Body JSON:
+      { session_id, question_id, transcript, score, feedback?, analysis? (list|dict) }
+    """
+    data = _json_body(request)
+    session_id = data.get("session_id")
+    question_id = data.get("question_id")
+    transcript = data.get("transcript") or ""
+    score = data.get("score")
+    feedback = data.get("feedback")
+    analysis = data.get("analysis")
+
+    if session_id is None or question_id is None or score is None:
+        return HttpResponseBadRequest("Thiếu tham số.")
+
+    session = get_object_or_404(ExamSession, pk=session_id)
+    _ensure_owner(session, request.user)
+    question = get_object_or_404(Question, pk=question_id, is_supplementary=False)
+
+    er, created = ExamResult.objects.update_or_create(
+        session=session, question=question,
+        defaults={
+            "transcript": transcript,
+            "score": float(score),
+            "feedback": feedback,
+            "analysis": analysis,
+            "answered_at": timezone.now(),
+        }
+    )
+    return JsonResponse({
+        "status": "ok",
+        "created": created,
+        "result_id": er.id,
+    })
+
+# (Không còn dùng nếu bốc từ barem phía client, nhưng giữ lại nếu cần)
 @login_required
-def update_profile_image(request):
-    if 'profile_image' in request.FILES:
-        user_profile, created = UserProfile.objects.get_or_create(user=request.user)
-        user_profile.profile_image = request.FILES['profile_image']
-        user_profile.save()
-        return JsonResponse({
-            'success': True,
-            'message': 'Ảnh đại diện đã được cập nhật thành công.',
-            'image_url': user_profile.profile_image.url
-        })
-    return JsonResponse({'success': False, 'message': 'Không có tệp ảnh nào được gửi lên.'})
+@require_POST
+def get_supplementary_for_session(request: HttpRequest, session_id: int) -> JsonResponse:
+    session = get_object_or_404(ExamSession.objects.select_related("subject"), pk=session_id)
+    _ensure_owner(session, request.user)
+
+    pool = list(Question.objects.filter(subject=session.subject, is_supplementary=True))
+    random.shuffle(pool)
+    picked = pool[:2]
+
+    items = [{"id": q.id, "question": q.question_text} for q in picked]
+    return JsonResponse({"status": "ok", "items": items})
+
+# Lưu một câu hỏi phụ (gọi trước khi finalize)
+@login_required
+@require_POST
+def save_supplementary_result(request: HttpRequest) -> JsonResponse:
+    """
+    Body JSON:
+      { session_id, question_text, transcript, score, max_score?, feedback?, analysis? }
+    """
+    data = _json_body(request)
+    session_id = data.get("session_id")
+    question_text = (data.get("question_text") or "").strip()
+    transcript = data.get("transcript") or ""
+    score = data.get("score")
+    max_score = data.get("max_score")
+    feedback = data.get("feedback")
+    analysis = data.get("analysis")
+
+    if session_id is None or not question_text or score is None:
+        return HttpResponseBadRequest("Thiếu tham số.")
+
+    session = get_object_or_404(ExamSession, pk=session_id)
+    _ensure_owner(session, request.user)
+
+    sr = SupplementaryResult.objects.create(
+        session=session,
+        question_text=question_text,
+        transcript=transcript,
+        score=float(score),
+        max_score=float(max_score) if max_score is not None else 1.0,
+        feedback=feedback,
+        analysis=analysis,
+    )
+    return JsonResponse({"status": "ok", "supplementary_result_id": sr.id})
+
+# Chốt phiên thi (tính tổng điểm, khóa session)
+@login_required
+@require_POST
+def finalize_session_view(request: HttpRequest, session_id: int) -> JsonResponse:
+    session = get_object_or_404(ExamSession, pk=session_id)
+    _ensure_owner(session, request.user)
+
+    main_avg, supp_sum, total = _compute_scores(session)
+    if main_avg is None:
+        return JsonResponse({"status": "error", "message": "Chưa có kết quả nào của phần chính."}, status=400)
+
+    session.is_completed = True
+    session.completed_at = timezone.now()
+    session.final_score = total
+    session.save(update_fields=["is_completed", "completed_at", "final_score"])
+
+    return JsonResponse({"status": "success", "final_score": session.final_score})
+
+# ===========================
+# Legacy supplementary APIs (giữ nếu còn dùng ở nơi khác)
+# ===========================
+
+@login_required
+@require_GET
+def get_supplementary_questions_api(request: HttpRequest, session_id: int) -> JsonResponse:
+    session = get_object_or_404(ExamSession.objects.select_related("subject"), pk=session_id)
+    _ensure_owner(session, request.user)
+    supp_qs = Question.objects.filter(subject=session.subject, is_supplementary=True)
+    items = [{"id": q.id, "question": q.question_text} for q in supp_qs]
+    return JsonResponse({"status": "ok", "items": items})
+
+@login_required
+@require_GET
+def get_supplementary_questions(request: HttpRequest) -> JsonResponse:
+    session_id = request.GET.get("session_id")
+    subject_code = request.GET.get("subject_code")
+
+    subject = None
+    if session_id:
+        session = get_object_or_404(ExamSession.objects.select_related("subject"), pk=int(session_id))
+        _ensure_owner(session, request.user)
+        subject = session.subject
+    elif subject_code:
+        subject = get_object_or_404(Subject, subject_code=subject_code)
+    else:
+        return HttpResponseBadRequest("Thiếu session_id hoặc subject_code.")
+
+    pool = list(Question.objects.filter(subject=subject, is_supplementary=True))
+    random.shuffle(pool)
+    picked = [{"id": q.id, "question": q.question_text} for q in pool[:2]]
+    return JsonResponse({"status": "ok", "items": picked})
+
+# ===========================
+# Profile
+# ===========================
+
+@login_required
+@require_POST
+def update_profile_image(request: HttpRequest) -> JsonResponse:
+    """
+    Nhận FormData('profile_image') và lưu vào hồ sơ người dùng.
+    Trả về JSON: { success: bool, image_url?: str, error?: str }
+    """
+    file_obj = request.FILES.get('profile_image')
+    if not file_obj:
+        return JsonResponse({"success": False, "error": "Thiếu file 'profile_image'."}, status=400)
+
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+
+    # Xoá file cũ (tuỳ chọn)
+    try:
+        if profile.profile_image:
+            profile.profile_image.delete(save=False)
+    except Exception:
+        pass
+
+    profile.profile_image = file_obj
+    profile.save()
+
+    return JsonResponse({"success": True, "image_url": profile.profile_image.url})
