@@ -1,12 +1,15 @@
-# ai_qna_project/qna/urls.py
 from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import path
+from django.views.generic import RedirectView   # ⬅️ THÊM DÒNG NÀY
 from . import views
 
 # (khuyến nghị) nếu bạn include với namespace: app_name = "qna"
 
 urlpatterns = [
+    # ⬅️ THÊM DÒNG NÀY: chuyển "/" về trang dashboard
+    path("", RedirectView.as_view(pattern_name="dashboard", permanent=False), name="root"),
+
     path('dashboard/', views.dashboard_view, name='dashboard'),
     path('exam_page/<str:subject_code>/', views.exam_view, name='exam_page'),
 
@@ -23,7 +26,7 @@ urlpatterns = [
          name='get_supplementary_for_session'),
     path('api/finalize_session/<int:session_id>/', views.finalize_session_view, name='finalize_session'),
 
-    # Legacy (giữ nếu nơi khác còn dùng)
+    # Legacy
     path('api/supplementary/<int:session_id>/', views.get_supplementary_questions_api,
          name='get_supplementary_questions_api'),
     path('api/supplementary/random/', views.get_supplementary_questions, name='get_supplementary_questions'),

@@ -1,94 +1,128 @@
 {% load static %}
-<html lang="vi" class="h-full bg-gray-100">
+<html lang="vi" class="h-full">
+<head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Đăng ký tài khoản - DUE-EXAM</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Thêm một font chữ đẹp hơn từ Google Fonts */
+        @import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Be Vietnam Pro', sans-serif;
+        }
+    </style>
 </head>
-<body class="flex items-center justify-center min-h-screen">
-    <div class="w-full max-w-md">
-        <div class="flex justify-center mb-6">
-            <img src="{% static 'images/logo.jpg' %}" alt="Logo" class="w-20 h-20">
-        </div>
+<body class="bg-gray-50">
 
-        <div class="bg-white p-8 rounded-xl shadow-lg">
-            <h2 class="text-2xl font-bold text-gray-800 mb-6 text-center">Đăng ký tài khoản mới</h2>
-            <form method="post">
-                {% csrf_token %}
+    <main class="flex items-center justify-center min-h-screen w-full p-4">
+        <div class="w-full max-w-md">
+            <div class="text-center mb-8">
+                <img src="{% static 'images/logo.jpg' %}" alt="Logo" class="w-24 h-24 mx-auto mb-4 rounded-full shadow-lg border-4 border-white">
+                <h1 class="text-3xl font-bold text-gray-800">Tạo tài khoản</h1>
+                <p class="text-gray-500 mt-2">Bắt đầu hành trình của bạn với hệ thống thi DUE-EXAM.</p>
+            </div>
 
-                {% if messages %}
-                    <div class="mb-4">
-                        {% for message in messages %}
-                            <div class="p-3 rounded-md text-sm {% if message.tags == 'error' %}bg-red-100 text-red-700{% elif message.tags == 'success' %}bg-green-100 text-green-700{% else %}bg-blue-100 text-blue-700{% endif %}">
-                                {{ message }}
-                            </div>
-                        {% endfor %}
+            <div class="bg-white p-8 rounded-2xl shadow-xl">
+                <form method="post" class="space-y-6">
+                    {% csrf_token %}
+
+                    {% if messages or form.non_field_errors %}
+                        <div class="space-y-3">
+                            {% if messages %}
+                                {% for message in messages %}
+                                    <div class="p-3 rounded-lg text-sm font-medium {% if message.tags == 'error' %}bg-red-100 text-red-800{% elif message.tags == 'success' %}bg-green-100 text-green-800{% else %}bg-blue-100 text-blue-800{% endif %}">
+                                        {{ message }}
+                                    </div>
+                                {% endfor %}
+                            {% endif %}
+                            {% if form.non_field_errors %}
+                                <div class="p-3 rounded-lg text-sm font-medium bg-red-100 text-red-800">
+                                    {% for error in form.non_field_errors %}
+                                        <p>{{ error }}</p>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+
+                    <div>
+                        <label for="{{ form.full_name.id_for_label }}" class="block text-sm font-medium text-gray-700">{{ form.full_name.label }}</label>
+                        <div class="mt-1">
+                            {{ form.full_name }}
+                        </div>
+                        {% for error in form.full_name.errors %}<p class="text-red-600 text-xs mt-1">{{ error }}</p>{% endfor %}
+                        {% if form.full_name.help_text %}<p class="text-gray-500 text-xs mt-1">{{ form.full_name.help_text|safe }}</p>{% endif %}
                     </div>
-                {% endif %}
 
-                {% if form.non_field_errors %}
-                    <div class="p-3 rounded-md text-sm bg-red-100 text-red-700 mb-4">
-                        {% for error in form.non_field_errors %}
-                            <p>{{ error }}</p>
-                        {% endfor %}
+                    <div>
+                        <label for="{{ form.username.id_for_label }}" class="block text-sm font-medium text-gray-700">{{ form.username.label }}</label>
+                         <div class="mt-1">
+                            {{ form.username }}
+                         </div>
+                        {% for error in form.username.errors %}<p class="text-red-600 text-xs mt-1">{{ error }}</p>{% endfor %}
+                        {% if form.username.help_text %}<p class="text-gray-500 text-xs mt-1">{{ form.username.help_text|safe }}</p>{% endif %}
                     </div>
-                {% endif %}
 
-                <div class="mb-4 group">
-                    <label for="{{ form.full_name.id_for_label }}" class="block text-gray-700 text-sm font-bold mb-2">{{ form.full_name.label }}</label>
-                    {{ form.full_name }}
-                    {% for error in form.full_name.errors %}
-                        <p class="text-red-500 text-xs italic mt-1">{{ error }}</p>
-                    {% endfor %}
-                    <div class="text-gray-500 text-xs mt-1">{{ form.full_name.help_text|safe }}</div>
-                </div>
+                     <div>
+                        <label for="{{ form.class_name.id_for_label }}" class="block text-sm font-medium text-gray-700">{{ form.class_name.label }}</label>
+                         <div class="mt-1">
+                            {{ form.class_name }}
+                         </div>
+                        {% for error in form.class_name.errors %}<p class="text-red-600 text-xs mt-1">{{ error }}</p>{% endfor %}
+                        {% if form.class_name.help_text %}<p class="text-gray-500 text-xs mt-1">{{ form.class_name.help_text|safe }}</p>{% endif %}
+                    </div>
 
-                <div class="mb-4 group">
-                    <label for="{{ form.username.id_for_label }}" class="block text-gray-700 text-sm font-bold mb-2">{{ form.username.label }}</label>
-                    {{ form.username }}
-                    {% for error in form.username.errors %}
-                        <p class="text-red-500 text-xs italic mt-1">{{ error }}</p>
-                    {% endfor %}
-                    <div class="text-gray-500 text-xs mt-1">{{ form.username.help_text|safe }}</div>
-                </div>
+                    <div>
+                        <label for="{{ form.password.id_for_label }}" class="block text-sm font-medium text-gray-700">Mật khẩu</label>
+                        <div class="mt-1">
+                            {{ form.password }}
+                        </div>
+                        {% for error in form.password.errors %}<p class="text-red-600 text-xs mt-1">{{ error }}</p>{% endfor %}
+                        {% if form.password.help_text %}<p class="text-gray-500 text-xs mt-1">{{ form.password.help_text|safe }}</p>{% endif %}
+                    </div>
 
-                <div class="mb-4 group">
-                    <label for="{{ form.class_name.id_for_label }}" class="block text-gray-700 text-sm font-bold mb-2">{{ form.class_name.label }}</label>
-                    {{ form.class_name }}
-                    {% for error in form.class_name.errors %}
-                        <p class="text-red-500 text-xs italic mt-1">{{ error }}</p>
-                    {% endfor %}
-                     <div class="text-gray-500 text-xs mt-1">{{ form.class_name.help_text|safe }}</div>
-                </div>
+                    <div>
+                        <label for="{{ form.password2.id_for_label }}" class="block text-sm font-medium text-gray-700">Nhập lại mật khẩu</label>
+                        <div class="mt-1">
+                            {{ form.password2 }}
+                        </div>
+                        {% for error in form.password2.errors %}<p class="text-red-600 text-xs mt-1">{{ error }}</p>{% endfor %}
+                        {% if form.password2.help_text %}<p class="text-gray-500 text-xs mt-1">{{ form.password2.help_text|safe }}</p>{% endif %}
+                    </div>
 
-                <div class="mb-4 group">
-                    <label for="{{ form.password.id_for_label }}" class="block text-gray-700 text-sm font-bold mb-2">Mật khẩu</label>
-                    {{ form.password }}
-                    {% for error in form.password.errors %}
-                        <p class="text-red-500 text-xs italic mt-1">{{ error }}</p>
-                    {% endfor %}
-                    <div class="text-gray-500 text-xs mt-1">{{ form.password.help_text|safe }}</div>
-                </div>
+                    <div>
+                        <button type="submit" class="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-300">
+                            Đăng ký
+                        </button>
+                    </div>
+                </form>
 
-                <div class="mb-6 group">
-                    <label for="{{ form.password2.id_for_label }}" class="block text-gray-700 text-sm font-bold mb-2">Nhập lại mật khẩu</label>
-                    {{ form.password2 }}
-                    {% for error in form.password2.errors %}
-                        <p class="text-red-500 text-xs italic mt-1">{{ error }}</p>
-                    {% endfor %}
-                    <div class="text-gray-500 text-xs mt-1">{{ form.password2.help_text|safe }}</div>
-                </div>
-
-                <div class="flex items-center justify-between mt-6">
-                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg focus:outline-none focus:shadow-outline w-full transition-colors">
-                        Đăng ký
-                    </button>
-                </div>
-                <p class="text-center text-gray-600 text-sm mt-4">
-                    Đã có tài khoản? <a href="{% url 'login' %}" class="text-blue-600 hover:text-blue-800 font-semibold">Đăng nhập ngay</a>
+                <p class="text-center text-sm text-gray-600 mt-8">
+                    Đã có tài khoản?
+                    <a href="{% url 'login' %}" class="font-semibold text-blue-600 hover:text-blue-500 transition-colors">
+                        Đăng nhập ngay
+                    </a>
                 </p>
-            </form>
+            </div>
         </div>
-    </div>
+    </main>
+
+    <script>
+        // Script này tự động áp dụng các lớp CSS của Tailwind vào các trường input của Django
+        document.addEventListener('DOMContentLoaded', function() {
+            const fields = ['full_name', 'username', 'class_name', 'password', 'password2'];
+            const baseClasses = 'appearance-none block w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-shadow';
+
+            fields.forEach(function(fieldName) {
+                // Django có thể thêm tiền tố 'id_' vào tên trường
+                const input = document.querySelector(`[name="${fieldName}"]`);
+                if (input) {
+                    input.classList.add(...baseClasses.split(' '));
+                }
+            });
+        });
+    </script>
+
 </body>
 </html>
