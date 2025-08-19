@@ -1,108 +1,126 @@
-{% extends 'base.html' %}
+{% extends "base.html" %}
 {% load static %}
 
-{% block title %}Thông tin cá nhân{% endblock %}
+{% block title %}Hồ sơ cá nhân{% endblock %}
 
 {% block content %}
-<div id="profile-content" class="content-section">
-    <h2 class="text-3xl font-bold text-gray-800 mb-6">Thông tin cá nhân</h2>
+<div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+    <div class="bg-white rounded-2xl shadow-xl overflow-hidden transform transition-all hover:scale-[1.01] duration-300">
+        <div class="md:grid md:grid-cols-3">
+            <div class="md:col-span-1 bg-gradient-to-br from-gray-50 to-gray-100 p-8 flex flex-col items-center justify-center text-center border-b md:border-b-0 md:border-r border-gray-200">
+                <form id="avatar-form">
+                    {% csrf_token %}
+                    <div class="relative group w-40 h-40 mb-4 cursor-pointer" onclick="document.getElementById('id_profile_image').click();">
+                        <img id="profile-image-preview"
+                             src="{{ avatar_url }}"
+                             alt="Ảnh đại diện"
+                             class="w-full h-full rounded-full object-cover border-4 border-white shadow-lg group-hover:border-indigo-400 transition-colors duration-300">
 
-    {% if messages %}
-        {% for message in messages %}
-            <div class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 rounded-md mb-6 max-w-4xl mx-auto" role="alert">
-                <p class="font-bold">Thành công!</p>
-                <p>{{ message }}</p>
-            </div>
-        {% endfor %}
-    {% endif %}
+                        <div class="absolute inset-0 bg-black bg-opacity-50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300">
+                            <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                        </div>
+                    </div>
+                    <input type="file" name="profile_image" id="id_profile_image" class="hidden" accept="image/*">
+                </form>
 
-    <form method="POST" enctype="multipart/form-data" class="bg-white p-8 rounded-xl shadow-md max-w-4xl mx-auto">
-        {% csrf_token %}
-        <div class="flex flex-col md:flex-row items-center md:items-start gap-8">
-
-            <div class="flex-shrink-0 flex flex-col items-center">
-                <label for="id_profile_image" class="block text-sm font-medium text-gray-500 mb-2 cursor-pointer">Ảnh đại diện</label>
-                <div class="relative group w-40 h-40">
-                    <img id="profile-image-preview"
-                         src="{{ avatar_url }}"
-                         alt="Ảnh đại diện"
-                         class="w-full h-full object-cover rounded-full border-4 border-gray-200 shadow-sm transition-all duration-300 group-hover:border-indigo-400">
-
-                    <label for="id_profile_image" class="absolute inset-0 bg-black bg-opacity-50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 cursor-pointer">
-                        <i class="fas fa-camera text-white text-2xl"></i>
-                    </label>
-
-                    {{ form.profile_image }}
-                </div>
+                <h2 class="text-2xl font-bold text-gray-800 mt-2">{{ full_name }}</h2>
+                <p class="text-md text-gray-500">{{ student_id }}</p>
             </div>
 
-            <div class="flex-grow w-full space-y-6">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-500">Họ và tên</label>
-                        <p class="mt-1 text-lg font-semibold text-gray-900 bg-gray-100 p-3 rounded-md">{{ full_name }}</p>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-500">Mã số sinh viên</label>
-                        <p class="mt-1 text-lg font-semibold text-gray-900 bg-gray-100 p-3 rounded-md">{{ student_id }}</p>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-500">Lớp</label>
-                        <p class="mt-1 text-lg font-semibold text-gray-900 bg-gray-100 p-3 rounded-md">{{ class_name }}</p>
-                    </div>
+            <div class="md:col-span-2 p-8">
+                <h3 class="text-xl font-semibold text-gray-800 mb-6 border-b pb-3">Thông tin chi tiết</h3>
 
-                    <div>
-                        <label for="{{ form.faculty.id_for_label }}" class="block text-sm font-medium text-gray-500">Khoa</label>
-                        {{ form.faculty }}
-                        {% for error in form.faculty.errors %}<p class="text-red-500 text-xs mt-1">{{ error }}</p>{% endfor %}
-                    </div>
-                    <div class="md:col-span-2">
-                        <label for="{{ form.email.id_for_label }}" class="block text-sm font-medium text-gray-500">Email</label>
-                        {{ form.email }}
-                        {% for error in form.email.errors %}<p class="text-red-500 text-xs mt-1">{{ error }}</p>{% endfor %}
-                    </div>
-                </div>
+                <div id="alert-container" class="mb-6"></div>
 
-                <div class="border-t pt-6 text-right">
-                    <button type="submit" class="bg-indigo-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-indigo-700 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                        Lưu thay đổi
-                    </button>
+                <div class="space-y-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-600">Họ và tên</label>
+                        <div class="mt-1 text-lg text-gray-900 bg-gray-50 px-4 py-2 rounded-lg border border-gray-200">{{ full_name }}</div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-600">Mã sinh viên</label>
+                        <div class="mt-1 text-lg text-gray-900 bg-gray-50 px-4 py-2 rounded-lg border border-gray-200">{{ student_id }}</div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-600">Lớp</label>
+                        <div class="mt-1 text-lg text-gray-900 bg-gray-50 px-4 py-2 rounded-lg border border-gray-200">{{ class_name }}</div>
+                    </div>
                 </div>
             </div>
         </div>
-    </form>
+    </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    // ID của input file được render bởi Django là 'id_tên_trường'
-    const profileImageInput = document.getElementById('id_profile_image');
-    const profileImagePreview = document.getElementById('profile-image-preview');
+    const imageInput = document.getElementById('id_profile_image');
+    const imagePreview = document.getElementById('profile-image-preview');
+    const alertContainer = document.getElementById('alert-container');
+    const originalImageSrc = imagePreview.src;
 
-    // Chỉ giữ lại logic để xem trước ảnh
-    if (profileImageInput && profileImagePreview) {
-        profileImageInput.addEventListener('change', (event) => {
-            const file = event.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    profileImagePreview.src = e.target.result;
-                };
-                reader.readAsDataURL(file);
+    // Hàm hiển thị thông báo động
+    const showAlert = (message, isSuccess = true) => {
+        const bgColor = isSuccess ? 'bg-green-100' : 'bg-red-100';
+        const borderColor = isSuccess ? 'border-green-500' : 'border-red-500';
+        const textColor = isSuccess ? 'text-green-800' : 'text-red-800';
+
+        const alertHTML = `
+            <div class="${bgColor} border-l-4 ${borderColor} ${textColor} p-4 rounded-md" role="alert">
+                <p>${message}</p>
+            </div>
+        `;
+        alertContainer.innerHTML = alertHTML;
+
+        // Tự động ẩn thông báo sau 3 giây
+        setTimeout(() => {
+            alertContainer.innerHTML = '';
+        }, 3000);
+    };
+
+    // Xử lý khi người dùng chọn ảnh
+    imageInput.addEventListener('change', async (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        // Hiển thị ảnh xem trước
+        const reader = new FileReader();
+        reader.onload = (e) => imagePreview.src = e.target.result;
+        reader.readAsDataURL(file);
+
+        // Chuẩn bị tải lên
+        const formData = new FormData();
+        formData.append('profile_image', file);
+
+        // Hiển thị trạng thái đang tải
+        imagePreview.classList.add('opacity-50', 'animate-pulse');
+
+        try {
+            const response = await fetch("{% url 'qna:update_profile_image' %}", {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                },
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                imagePreview.src = data.image_url; // Cập nhật ảnh từ server
+                showAlert('Cập nhật ảnh đại diện thành công!', true);
+            } else {
+                showAlert(data.error || 'Tải ảnh thất bại. Vui lòng thử lại.', false);
+                imagePreview.src = originalImageSrc; // Khôi phục ảnh cũ nếu lỗi
             }
-        });
-    }
-
-    // Tự động áp dụng class Tailwind cho các ô input text để giao diện đẹp hơn
-    const fieldsToStyle = ['email', 'faculty'];
-    const textInputClasses = 'mt-1 block w-full px-3 py-2 text-lg border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500';
-
-    fieldsToStyle.forEach(fieldName => {
-        const input = document.getElementById(`id_${fieldName}`);
-        if(input) {
-            input.className = textInputClasses;
+        } catch (error) {
+            showAlert('Lỗi kết nối. Không thể cập nhật ảnh.', false);
+            imagePreview.src = originalImageSrc; // Khôi phục ảnh cũ nếu lỗi
+        } finally {
+            // Khôi phục lại trạng thái bình thường
+            imagePreview.classList.remove('opacity-50', 'animate-pulse');
+            imageInput.value = ''; // Reset để có thể chọn lại cùng file
         }
     });
 });

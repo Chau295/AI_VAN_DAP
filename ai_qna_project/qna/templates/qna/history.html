@@ -10,7 +10,7 @@
       <h1 class="text-2xl font-bold text-gray-800">Lịch sử bài thi</h1>
       <p class="text-sm text-gray-500 mt-1">Xem lại các phiên thi gần đây của bạn.</p>
     </div>
-    <a href="{% url 'dashboard' %}" class="inline-flex items-center px-4 py-2 rounded-lg border text-sm font-semibold hover:bg-gray-50">
+    <a href="{% url 'qna:dashboard' %}" class="inline-flex items-center px-4 py-2 rounded-lg border text-sm font-semibold hover:bg-gray-50">
       ← Quay lại trang chính
     </a>
   </div>
@@ -50,7 +50,7 @@
             {{ session.final_total|default:0|floatformat:2 }} / 10
           </td>
           <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-center">
-            <a href="{% url 'history_detail' session.id %}" class="inline-flex items-center px-3 py-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700">
+            <a href="{% url 'qna:history_detail' session.id %}" class="inline-flex items-center px-3 py-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700">
               Xem chi tiết
             </a>
           </td>

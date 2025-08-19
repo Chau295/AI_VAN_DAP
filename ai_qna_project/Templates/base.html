@@ -33,15 +33,15 @@
             </div>
 
             <nav class="flex-1 px-4 py-4 space-y-2">
-                <a href="{% url 'dashboard' %}" class="sidebar-link flex items-center px-4 py-3 rounded-lg transition-colors hover:bg-blue-700 {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
+                <a href="{% url 'qna:dashboard' %}" class="sidebar-link flex items-center px-4 py-3 rounded-lg transition-colors hover:bg-blue-700 {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
                     <i class="fas fa-home w-6 text-gray-300"></i>
                     <span class="ml-3">Trang chủ</span>
                 </a>
-                <a href="{% url 'history' %}" class="sidebar-link flex items-center px-4 py-3 rounded-lg transition-colors hover:bg-blue-700 {% if request.resolver_match.url_name == 'history' %}active{% endif %}">
+                <a href="{% url 'qna:history' %}" class="sidebar-link flex items-center px-4 py-3 rounded-lg transition-colors hover:bg-blue-700 {% if request.resolver_match.url_name == 'history' %}active{% endif %}">
                     <i class="fas fa-history w-6 text-gray-300"></i>
                     <span class="ml-3">Lịch sử thi</span>
                 </a>
-                <a href="{% url 'profile' %}" class="sidebar-link flex items-center px-4 py-3 rounded-lg transition-colors hover:bg-blue-700 {% if request.resolver_match.url_name == 'profile' %}active{% endif %}">
+                <a href="{% url 'qna:profile' %}" class="sidebar-link flex items-center px-4 py-3 rounded-lg transition-colors hover:bg-blue-700 {% if request.resolver_match.url_name == 'profile' %}active{% endif %}">
                     <i class="fas fa-user w-6 text-gray-300"></i>
                     <span class="ml-3">Thông tin cá nhân</span>
                 </a>

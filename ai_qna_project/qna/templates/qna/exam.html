@@ -133,7 +133,7 @@
                           <div class="bg-gray-50 rounded-lg p-6 border border-gray-200">
                               <div class="text-sm font-medium text-gray-600 mb-1">Tổng điểm cuối cùng</div>
                               <div class="text-5xl font-extrabold text-blue-600 leading-none">
-                                  <span id="finalTotalScore">0.00</span><span class="text-gray-400 text-2xl">/10</span>
+                                  <span id="finalTotalScore">0.00</span><span class="text-gray-400 text-2xl">/7</span>
                               </div>
                               <div class="mt-6 border-t pt-4">
                                   <div id="appealTimer">
@@ -219,56 +219,24 @@
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
   }
-  .modal-content {
-      /* Styles are now applied via Tailwind classes directly on the elements */
-  }
+  .modal-content { }
   .btn {
     padding: 10px 20px;
     border-radius: 8px;
-    border: 1px solid #d1d5db; /* gray-300 */
+    border: 1px solid #d1d5db;
     background: #fff;
     cursor: pointer;
     font-weight: 600;
     transition: all 0.2s;
     box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   }
-  .btn:hover {
-    border-color: #9ca3af; /* gray-400 */
-    background: #f9fafb; /* gray-50 */
-  }
-  .btn-primary {
-    border-color: #2563eb; /* blue-600 */
-    background: #2563eb;
-    color: #fff;
-  }
-  .btn-primary:hover {
-    background: #1d4ed8; /* blue-700 */
-    border-color: #1d4ed8;
-  }
-  .btn-sm {
-    padding: 6px 12px;
-    font-size: 0.875rem; /* text-sm */
-    border-radius: 6px;
-  }
-  .card {
-    background: #fff;
-    border: 1px solid #e5e7eb; /* gray-200 */
-    border-radius: 12px;
-    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
-  }
-  .line-clamp-2 {
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-  }
-  .line-clamp-3 {
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 3;
-  }
-  /* Custom scrollbar for scrollable modal body */
+  .btn:hover { border-color: #9ca3af; background: #f9fafb; }
+  .btn-primary { border-color: #2563eb; background: #2563eb; color: #fff; }
+  .btn-primary:hover { background: #1d4ed8; border-color: #1d4ed8; }
+  .btn-sm { padding: 6px 12px; font-size: 0.875rem; border-radius: 6px; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
+  .line-clamp-2{ overflow:hidden; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+  .line-clamp-3{ overflow:hidden; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; }
   #finalResultModal .overflow-y-auto::-webkit-scrollbar,
   #answerDetailModal .overflow-y-auto::-webkit-scrollbar { width: 8px; }
   #finalResultModal .overflow-y-auto::-webkit-scrollbar-track,
@@ -292,7 +260,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const SUPP_WINDOW_MS   = 6  * 60 * 1000;
   const APPEAL_WINDOW_MS = 6  * 60 * 1000;
   const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
-  const API_SAVE_SUPP = "/api/save_supplementary_result/"; // đảm bảo đã thêm URL này
+  const API_SAVE_SUPP = "/api/save_supplementary_result/";
 
   /* ============== Elements & State ============== */
   const elements = {
@@ -320,7 +288,7 @@ document.addEventListener('DOMContentLoaded', () => {
     suppInProgress: false,
     suppQueue: [],
     currentSuppIndex: -1,
-    eachSuppMax: 0,
+    eachSuppMax: 1.0,   // ✅ mỗi câu phụ luôn tối đa 1.0 điểm (hiển thị/lưu REST)
     appealContext: null
   };
 
@@ -354,8 +322,8 @@ document.addEventListener('DOMContentLoaded', () => {
         session_id: elements.sessionId,
         question_text: r.question_text,
         transcript: r.transcript,
-        score: r.score,
-        max_score: r.max_score || state.eachSuppMax,
+        score: r.score,          // 0..1
+        max_score: 1.0,          // ✅ lưu thang 1.0 cố định
         feedback: r.feedback,
         analysis: r.analysis
       });
@@ -497,7 +465,7 @@ document.addEventListener('DOMContentLoaded', () => {
       process_type:'supplementary',
       session_id: elements.sessionId,
       question_text: q.question_text,
-      max_score: state.eachSuppMax
+      max_score: 10    // ✅ worker chấm thang 0..10
     }));
   }
 
@@ -524,17 +492,21 @@ document.addEventListener('DOMContentLoaded', () => {
       showScreen('selection');
       setAnswerUI('interaction');
     } else if(payload.type==='supp_question_complete'){
+      // ✅ scale về 0..1 và lưu max_score = 1.0
+      const rawScore = Number(d.score)||0;
+      const rawMax   = Number(d.max_score)||10;
+      const scaled   = Math.max(0, Math.min(1, rawScore / rawMax));
+
       const rec = {
         question_text: d.question_text,
-        score: d.score,
+        score: scaled,
         transcript: d.transcript,
         feedback: d.feedback,
         analysis: d.analysis || [],
-        max_score: d.max_score,
+        max_score: 1.0,
         _saved: false
       };
       state.suppResults.push(rec);
-      // lưu REST sớm
       persistSupplementaryItem(rec).catch(console.error);
 
       const next = state.currentSuppIndex + 1;
@@ -561,9 +533,8 @@ document.addEventListener('DOMContentLoaded', () => {
       btnExit.textContent='Xem kết quả';
       btnExit.onclick = () => { modalHide('summaryModal'); showFinal(false); };
     }else{
-      const need = Math.max(0, 7 - state.totalScoreMain);
-      state.eachSuppMax = need / 2;
-      note.innerHTML = `Điểm chưa đạt. Bạn có <b>2 câu hỏi phụ</b>. Mỗi câu tối đa <b>${fmt(state.eachSuppMax)}</b> điểm.`;
+      state.eachSuppMax = 1.0; // ✅ cố định 1.0 điểm/câu phụ
+      note.innerHTML = `Điểm chưa đạt. Bạn có <b>2 câu hỏi phụ</b>. Mỗi câu tối đa <b>1.00</b> điểm.`;
       btnSupp.style.display='inline-block';
       btnExit.textContent='Đóng';
       btnExit.onclick = () => modalHide('summaryModal');
@@ -599,8 +570,8 @@ document.addEventListener('DOMContentLoaded', () => {
     await saveAllSuppToREST();
     stopSuppCountdown();
     document.getElementById('suppSticky').style.display = 'none';
-    const extra = state.suppResults.reduce((s,r)=>s+(Number(r.score)||0),0);
-    state.totalScoreFinal = state.totalScoreMain + extra;
+    const extra = state.suppResults.reduce((s,r)=>s+(Number(r.score)||0),0); // 0..2
+    state.totalScoreFinal = state.totalScoreMain + extra;                    // có thể >7, sẽ cap khi hiển thị
     showFinal(true);
   }
 
@@ -615,7 +586,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showAnswerDetail({
               title:`Câu phụ ${idx+1}`,
               question:r.question_text, transcript:r.transcript, feedback:r.feedback,
-              analysis:r.analysis, score:r.score, max:r.max_score || state.eachSuppMax
+              analysis:r.analysis, score:r.score, max:1.0
             }, { type:'supp', index:idx });
           }else{
             const r = state.mainResults[idx];
@@ -631,18 +602,18 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function showFinal(includeSupp){
-      const mainHtml = state.mainResults.map((r,i)=>`
-        <div class="card p-4 transition-all hover:shadow-md hover:border-blue-400">
-          <p class="text-gray-700 mb-3 line-clamp-2">${r.text || 'Không có nội dung câu hỏi'}</p>
-          <div class="flex items-center justify-between border-t border-gray-200 pt-3">
-            <div class="text-sm text-gray-500">
-              <span class="font-semibold text-gray-800">Câu ${i+1}:</span>
-              <b class="ml-2 font-mono text-lg text-blue-600">${fmt(r.score)}</b>
-              <span class="font-semibold text-gray-400">/ 10.00</span>
-            </div>
-            <button id="main-detail-${i}" class="btn btn-sm">Xem chi tiết</button>
+    const mainHtml = state.mainResults.map((r,i)=>`
+      <div class="card p-4 transition-all hover:shadow-md hover:border-blue-400">
+        <p class="text-gray-700 mb-3 line-clamp-2">${r.text || 'Không có nội dung câu hỏi'}</p>
+        <div class="flex items-center justify-between border-t border-gray-200 pt-3">
+          <div class="text-sm text-gray-500">
+            <span class="font-semibold text-gray-800">Câu ${i+1}:</span>
+            <b class="ml-2 font-mono text-lg text-blue-600">${fmt(r.score)}</b>
+            <span class="font-semibold text-gray-400">/ 10.00</span>
           </div>
-        </div>`).join('');
+          <button id="main-detail-${i}" class="btn btn-sm">Xem chi tiết</button>
+        </div>
+      </div>`).join('');
     document.getElementById('detailMain').innerHTML = mainHtml;
     addDetailButton('main-detail', state.mainResults, false);
 
@@ -656,7 +627,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="text-sm text-gray-500">
               <span class="font-semibold text-gray-800">Câu phụ ${i+1}:</span>
               <b class="ml-2 font-mono text-lg text-green-600">+${fmt(r.score)}</b>
-              <span class="font-semibold text-gray-400">/ ${fmt(r.max_score || state.eachSuppMax)}</span>
+              <span class="font-semibold text-gray-400">/ 1.00</span>
             </div>
             <button id="supp-detail-${i}" class="btn btn-sm">Xem chi tiết</button>
           </div>
@@ -667,7 +638,7 @@ document.addEventListener('DOMContentLoaded', () => {
       wrap.style.display='none';
     }
 
-    document.getElementById('finalTotalScore').textContent = fmt(Math.min(10, includeSupp ? state.totalScoreFinal : state.totalScoreMain));
+    document.getElementById('finalTotalScore').textContent = fmt(Math.min(7, includeSupp ? state.totalScoreFinal : state.totalScoreMain)); // ✅ cap 7.0
     startAppealCountdown();
     modalShow('finalResultModal');
   }
@@ -737,14 +708,13 @@ document.addEventListener('DOMContentLoaded', () => {
     finishBtn.addEventListener('click', async (e)=>{
       const btn=e.currentTarget; btn.disabled=true; btn.textContent='Đang lưu...';
       try{
-        // đảm bảo đã lưu các câu phụ còn sót
         for(const r of state.suppResults){ if(!r._saved) await persistSupplementaryItem(r); }
-        const res = await fetch("{% url 'finalize_session' session.id %}", {
+        const res = await fetch("{% url 'qna:finalize_session' session.id %}", {
           method:'POST', headers:{'X-CSRFToken': csrfToken}
         });
         const data = await res.json();
         if(data.status==='success' || data.status==='ok'){
-          window.location.href = "{% url 'dashboard' %}";
+          window.location.href = "{% url 'qna:dashboard' %}";
         }else{
           alert(data.message || 'Không thể lưu kết quả.');
           btn.disabled=false; btn.textContent='Hoàn thành';

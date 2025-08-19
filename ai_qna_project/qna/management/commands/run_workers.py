@@ -5,6 +5,19 @@ import os
 import re
 import asyncio
 import subprocess
+
+
+# --- Scoring helper for supplementary question (scale 0..10 to 0..1) ---
+SUPP_MAX_PER_QUESTION = 1.0
+SUPP_MAX_COUNT = 2
+
+def _scale_supp(score_out_of_10: float) -> float:
+    try:
+        s = float(score_out_of_10 or 0.0)
+    except (TypeError, ValueError):
+        s = 0.0
+    s = (s / 10.0) * SUPP_MAX_PER_QUESTION
+    return max(0.0, min(s, SUPP_MAX_PER_QUESTION))
 from unicodedata import normalize
 from uuid import uuid4
 import wave

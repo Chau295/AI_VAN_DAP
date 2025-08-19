@@ -1,4 +1,5 @@
 # ai_qna_project/qna/models.py
+from django.conf import settings
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -12,11 +13,15 @@ class Conversation(models.Model):
         return self.question_text
 
 class UserProfile(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE)
-    profile_image = models.ImageField(upload_to='profile_images/', null=True, blank=True)
-    full_name = models.CharField(max_length=255, blank=True, null=True)
-    student_id = models.CharField(max_length=50, unique=True, blank=True, null=True)
-    class_name = models.CharField(max_length=100, blank=True, null=True)
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    full_name = models.CharField(max_length=150, blank=True, default="")
+    class_name = models.CharField(max_length=100, blank=True, default="")
+    student_id = models.CharField(max_length=150, blank=True, default="")
+    # (optional) faculty = models.CharField(max_length=150, blank=True, default="")
+    # (optional) profile_image = models.ImageField(upload_to="avatars/", blank=True, null=True)
+
+    profile_image_blob = models.BinaryField(null=True, blank=True)
+    profile_image_mime = models.CharField(max_length=100, blank=True, default="")
 
     def __str__(self):
         return self.user.username
