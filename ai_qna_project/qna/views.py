@@ -443,7 +443,15 @@ def history_detail_view(request: HttpRequest, session_id: int) -> HttpResponse:
         .order_by("question_id")
     )
     supp_qs = SupplementaryResult.objects.filter(session=session).order_by("created_at")
-    supp_results = _dedupe_supp_for_display(supp_qs)
+    supp_results = SupplementaryResult.objects.filter(session=session)
+
+    # Thêm vòng lặp để tính toán scaled_score
+    for result in supp_results:
+        if result.max_score > 0:
+            # Tính toán điểm trên thang 1
+            result.scaled_score = result.score / result.max_score
+        else:
+            result.scaled_score = 0
 
     main_avg, supp_sum, final_total = _compute_scores(session)
 
@@ -455,6 +463,7 @@ def history_detail_view(request: HttpRequest, session_id: int) -> HttpResponse:
         "supp_sum": supp_sum,
         "final_total": final_total,
     })
+
 
 # ===========================
 # Exam flow

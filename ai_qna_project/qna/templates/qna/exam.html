@@ -13,7 +13,7 @@
           <p class="text-gray-500">Vui lòng chọn lần lượt các câu hỏi để trả lời.</p>
         </div>
         <div>
-          <h3 class="text-md font-semibold text-gray-700 text-right">Tổng thời gian còn lại</h3>
+          <h3 class="text-md font-semibold text-gray-700 text-right">Tổng thời gian thi còn lại</h3>
           <div id="main-timer" class="mt-1 text-3xl font-mono bg-red-100 text-red-700 text-center py-2 px-4 rounded-lg">15:00</div>
         </div>
       </div>
@@ -48,7 +48,7 @@
       <div class="w-full md:w-2/5 bg-gray-50 border-r border-gray-200 p-6 flex flex-col">
         <h2 id="answer-area-title" class="text-xl font-bold text-gray-800">Bài thi: {{ subject.name }}</h2>
         <p id="answer-area-question" class="mt-2 text-gray-600 bg-gray-100 p-4 rounded-lg min-h-[100px]"></p>
-        <div class="flex-shrink-0 mt-auto pt-6">
+        <div class="flex-shrink-0 mt-auto py-6">
           <button id="back-to-selection-btn" class="w-full text-center block bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg hover:bg-gray-300 transition-colors">
             <i class="fas fa-arrow-left mr-2"></i>Quay về danh sách
           </button>
@@ -83,7 +83,13 @@
 
   <div id="suppSticky" style="display:none; position:fixed; right:16px; bottom:16px; z-index:9998;">
     <div style="background:#111827; color:#fff; padding:8px 12px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.2)">
-      Câu hỏi phụ còn: <span id="suppStickyTimer" class="font-mono font-bold">06:00</span>
+      Thời gian còn: <span id="suppStickyTimer" class="font-mono font-bold">15:00</span>
+    </div>
+  </div>
+
+  <div id="mainSticky" style="display:none; position:fixed; right:16px; bottom:16px; z-index:9998;">
+    <div style="background:#111827; color:#fff; padding:8px 12px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.2)">
+      Thời gian còn: <span id="mainStickyTimer" class="font-mono font-bold">15:00</span>
     </div>
   </div>
 
@@ -96,11 +102,6 @@
               <p class="text-gray-600 mb-2">Điểm trung bình hiện tại của bạn là:</p>
               <div id="summaryScore" class="text-6xl font-extrabold text-gray-900 leading-none">0.00</div>
               <div id="summaryNote" class="mt-4 text-gray-700 bg-gray-50 p-4 rounded-lg"></div>
-
-              <div id="suppCountdownWrap" class="mt-6 rounded-lg bg-yellow-50 border border-yellow-200 p-4" style="display:none;">
-                  <div class="font-semibold text-yellow-800 mb-1">Thời gian còn lại để bắt đầu câu hỏi phụ</div>
-                  <div id="suppCountdown" class="font-mono text-2xl font-bold text-yellow-900">06:00</div>
-              </div>
           </div>
           <div class="p-4 bg-gray-50 border-t border-gray-200 rounded-b-xl flex items-center justify-end gap-3">
               <button id="btnSummaryExit" class="btn">Đóng</button>
@@ -255,9 +256,14 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+  // Tự động thu gọn sidebar khi vào trang thi
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar) {
+      sidebar.classList.add('collapsed');
+  }
+
   /* ============== Config ============== */
-  const MAIN_DURATION_MS = 15 * 60 * 1000;
-  const SUPP_WINDOW_MS   = 6  * 60 * 1000;
+  const EXAM_TOTAL_DURATION_MS = 15 * 60 * 1000; // Tổng thời gian thi là 15 phút
   const APPEAL_WINDOW_MS = 6  * 60 * 1000;
   const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
   const API_SAVE_SUPP = "/api/save_supplementary_result/";
@@ -283,12 +289,11 @@ document.addEventListener('DOMContentLoaded', () => {
     suppResults: [],
     totalScoreMain: 0,
     totalScoreFinal: 0,
-    suppDeadline: null,
     appealDeadline: null,
     suppInProgress: false,
     suppQueue: [],
     currentSuppIndex: -1,
-    eachSuppMax: 1.0,   // ✅ mỗi câu phụ luôn tối đa 1.0 điểm (hiển thị/lưu REST)
+    eachSuppMax: 1.0,
     appealContext: null
   };
 
@@ -322,8 +327,8 @@ document.addEventListener('DOMContentLoaded', () => {
         session_id: elements.sessionId,
         question_text: r.question_text,
         transcript: r.transcript,
-        score: r.score,          // 0..1
-        max_score: 1.0,          // ✅ lưu thang 1.0 cố định
+        score: r.score,
+        max_score: 1.0,
         feedback: r.feedback,
         analysis: r.analysis
       });
@@ -334,42 +339,49 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* ============== Timers ============== */
   let mainTimerEnd=null, mainTimerItv=null;
-  function startMainTimer(ms=MAIN_DURATION_MS){
+  let examFinished = false;
+
+  function startMainTimer(ms=EXAM_TOTAL_DURATION_MS){
     mainTimerEnd = Date.now() + ms;
     clearInterval(mainTimerItv);
     const el = document.getElementById('main-timer');
+    const mainStickyEl = document.getElementById('mainStickyTimer');
+    const suppStickyEl = document.getElementById('suppStickyTimer');
+
     const tick = () => {
       const left = Math.max(0, mainTimerEnd - Date.now());
-      el.textContent = mmss(left);
-      if (left<=0){ clearInterval(mainTimerItv); onFinishMainExam(); }
+      const timeStr = mmss(left);
+
+      el.textContent = timeStr;
+      if (mainStickyEl) mainStickyEl.textContent = timeStr;
+      if (suppStickyEl) suppStickyEl.textContent = timeStr;
+
+      if (left <= 0 && !examFinished){
+        examFinished = true;
+        clearInterval(mainTimerItv);
+        alert('Đã hết thời gian làm bài!');
+
+        // Tự động chuyển sang bước tiếp theo tùy thuộc vào trạng thái hiện tại
+        if (state.suppInProgress) {
+            finalizeAndShowResult(); // Nếu đang làm bài phụ thì kết thúc luôn
+        } else {
+            onFinishMainExam(); // Nếu đang làm bài chính thì chuyển sang modal tóm tắt
+        }
+      }
     };
     mainTimerItv = setInterval(tick, 250); tick();
   }
 
-  let suppItv=null, appealItv=null;
-  function startSuppCountdown(){
-    stopSuppCountdown();
-    document.getElementById('suppCountdownWrap').style.display = 'block';
-    document.getElementById('suppSticky').style.display = 'block';
-    suppItv = setInterval(()=>{
-      const left = state.suppDeadline - Date.now();
-      document.getElementById('suppCountdown').textContent = mmss(left);
-      document.getElementById('suppStickyTimer').textContent = mmss(left);
-      if (left<=0){ finalizeAndShowResult(); }
-    }, 250);
-  }
-  function stopSuppCountdown(){ if(suppItv){ clearInterval(suppItv); suppItv=null; } }
-
+  let appealItv=null;
   function startAppealCountdown(){
-    stopAppealCountdown();
+    if(appealItv) clearInterval(appealItv);
     state.appealDeadline = Date.now() + APPEAL_WINDOW_MS;
     appealItv = setInterval(()=>{
       const left = state.appealDeadline - Date.now();
       document.getElementById('appealCountdown').textContent = mmss(left);
-      if(left<=0) stopAppealCountdown();
+      if(left<=0) clearInterval(appealItv);
     }, 250);
   }
-  function stopAppealCountdown(){ if(appealItv){ clearInterval(appealItv); appealItv=null; } }
 
   /* ============== Screen / UI ============== */
   function showScreen(name){
@@ -386,9 +398,13 @@ document.addEventListener('DOMContentLoaded', () => {
       state.currentSuppIndex = idx;
       elements.aTitle.textContent = `Câu hỏi phụ ${idx+1}`;
       elements.backBtn.style.display = 'none';
+      document.getElementById('mainSticky').style.display = 'none';
+      document.getElementById('suppSticky').style.display = 'block';
     } else {
       elements.aTitle.textContent = 'Câu hỏi chính';
       elements.backBtn.style.display = 'block';
+      document.getElementById('suppSticky').style.display = 'none';
+      document.getElementById('mainSticky').style.display = 'block';
     }
     elements.aQuestion.textContent = questionData.question_text;
     setAnswerUI('interaction');
@@ -465,7 +481,7 @@ document.addEventListener('DOMContentLoaded', () => {
       process_type:'supplementary',
       session_id: elements.sessionId,
       question_text: q.question_text,
-      max_score: 10    // ✅ worker chấm thang 0..10
+      max_score: 10
     }));
   }
 
@@ -489,10 +505,10 @@ document.addEventListener('DOMContentLoaded', () => {
           text: document.querySelector(`[data-question-id="${d.question_id}"] p`)?.textContent || ''
         });
       }
+      document.getElementById('mainSticky').style.display = 'none';
       showScreen('selection');
       setAnswerUI('interaction');
     } else if(payload.type==='supp_question_complete'){
-      // ✅ scale về 0..1 và lưu max_score = 1.0
       const rawScore = Number(d.score)||0;
       const rawMax   = Number(d.max_score)||10;
       const scaled   = Math.max(0, Math.min(1, rawScore / rawMax));
@@ -517,9 +533,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* ============== Kết thúc phần chính ============== */
   function onFinishMainExam(){
-    if(state.mainResults.length===0){ alert('Bạn chưa trả lời câu hỏi nào.'); return; }
-    state.totalScoreMain = state.mainResults.reduce((s,r)=>s+(Number(r.score)||0),0) / state.mainResults.length;
-    state.suppDeadline = Date.now() + SUPP_WINDOW_MS;
+    if (examFinished && state.mainResults.length === 0) {
+        finalizeAndShowResult();
+        return;
+    }
+    if(state.mainResults.length===0 && !examFinished){ alert('Bạn chưa trả lời câu hỏi nào.'); return; }
+
+    document.getElementById('mainSticky').style.display = 'none';
+    state.totalScoreMain = state.mainResults.length > 0 ? state.mainResults.reduce((s,r)=>s+(Number(r.score)||0),0) / state.mainResults.length : 0;
 
     document.getElementById('summaryScore').textContent = fmt(state.totalScoreMain);
     const note   = document.getElementById('summaryNote');
@@ -527,19 +548,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnExit= document.getElementById('btnSummaryExit');
 
     if(state.totalScoreMain >= 7){
-      note.textContent = 'Điểm đạt yêu cầu. Bạn có thể xem kết quả chi tiết và phúc khảo trong 6 phút.';
+      note.textContent = 'Điểm đạt yêu cầu. Bạn có thể xem kết quả chi tiết.';
       btnSupp.style.display='none';
-      document.getElementById('suppCountdownWrap').style.display='none';
       btnExit.textContent='Xem kết quả';
       btnExit.onclick = () => { modalHide('summaryModal'); showFinal(false); };
     }else{
-      state.eachSuppMax = 1.0; // ✅ cố định 1.0 điểm/câu phụ
-      note.innerHTML = `Điểm chưa đạt. Bạn có <b>2 câu hỏi phụ</b>. Mỗi câu tối đa <b>1.00</b> điểm.`;
+      note.innerHTML = `Điểm chưa đạt. Bạn có thể làm <b>2 câu hỏi phụ</b> trong thời gian thi còn lại.`;
       btnSupp.style.display='inline-block';
       btnExit.textContent='Đóng';
       btnExit.onclick = () => modalHide('summaryModal');
       btnSupp.onclick = async () => { modalHide('summaryModal'); await startSuppExam(); };
-      startSuppCountdown();
     }
     modalShow('summaryModal');
   }
@@ -547,14 +565,13 @@ document.addEventListener('DOMContentLoaded', () => {
   /* ============== Câu hỏi phụ từ BAREM ============== */
   function pickSupp(){
     const pool = Array.isArray(window.__BAREM__) ? window.__BAREM__ : [];
-    const usedIds = new Set(examState.questions.map(q => q.id)); // loại 3 câu chính
+    const usedIds = new Set(examState.questions.map(q => q.id));
     const candidates = pool.filter(b => !usedIds.has(b.id));
     return shuffle(candidates).slice(0,2).map(b => ({ id: b.id, question_text: b.question }));
   }
   async function startSuppExam(){
     state.suppInProgress = true;
     state.suppResults = [];
-    document.getElementById('suppSticky').style.display = 'block';
 
     state.suppQueue = pickSupp();
     if(state.suppQueue.length===0){ alert('Không có câu hỏi phụ phù hợp trong barem.'); finalizeAndShowResult(); return; }
@@ -568,10 +585,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   async function finalizeAndShowResult(){
     await saveAllSuppToREST();
-    stopSuppCountdown();
     document.getElementById('suppSticky').style.display = 'none';
-    const extra = state.suppResults.reduce((s,r)=>s+(Number(r.score)||0),0); // 0..2
-    state.totalScoreFinal = state.totalScoreMain + extra;                    // có thể >7, sẽ cap khi hiển thị
+    const extra = state.suppResults.reduce((s,r)=>s+(Number(r.score)||0),0);
+    state.totalScoreFinal = state.totalScoreMain + extra;
     showFinal(true);
   }
 
@@ -638,7 +654,7 @@ document.addEventListener('DOMContentLoaded', () => {
       wrap.style.display='none';
     }
 
-    document.getElementById('finalTotalScore').textContent = fmt(Math.min(7, includeSupp ? state.totalScoreFinal : state.totalScoreMain)); // ✅ cap 7.0
+    document.getElementById('finalTotalScore').textContent = fmt(Math.min(7, includeSupp ? state.totalScoreFinal : state.totalScoreMain));
     startAppealCountdown();
     modalShow('finalResultModal');
   }
@@ -672,7 +688,12 @@ document.addEventListener('DOMContentLoaded', () => {
       startAnswering(q, 'main');
     });
   });
-  elements.backBtn.addEventListener('click', ()=>showScreen('selection'));
+
+  elements.backBtn.addEventListener('click', ()=>{
+      document.getElementById('mainSticky').style.display = 'none';
+      showScreen('selection');
+  });
+
   elements.startBtn.addEventListener('click', startRecording);
   elements.stopBtn.addEventListener('click', stopRecording);
   document.getElementById('finish-exam-btn').addEventListener('click', onFinishMainExam);
@@ -702,7 +723,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Gọi finalize_session khi bấm “Hoàn thành”
   const finishBtn = document.getElementById('btnFinishAll');
   if(finishBtn){
     finishBtn.addEventListener('click', async (e)=>{
