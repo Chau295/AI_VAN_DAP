@@ -25,9 +25,6 @@ urlpatterns = [
     path("api/get_supplementary/<int:session_id>/", views.get_supplementary_for_session, name="get_supplementary_for_session"),
     path("api/finalize_session/<int:session_id>/", views.finalize_session_view, name="finalize_session"),
 
-    # Legacy
-    path("api/supplementary/<int:session_id>/", views.get_supplementary_questions_api, name="get_supplementary_questions_api"),
-    path("api/supplementary/random/", views.get_supplementary_questions, name="get_supplementary_questions"),
 ]
 
 if settings.DEBUG:

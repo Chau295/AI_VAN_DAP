@@ -1,10 +1,20 @@
-# qna/views.py
+# -*- coding: utf-8 -*-
+"""
+Module này chứa tất cả các view và logic xử lý request cho ứng dụng Q&A.
+
+Bao gồm các chức năng chính:
+- Đăng ký, đăng nhập, quản lý hồ sơ người dùng.
+- Hiển thị dashboard, lịch sử thi.
+- Luồng thực hiện một phiên thi (câu hỏi chính và phụ).
+- Các API endpoints để lưu kết quả, lấy câu hỏi, và cập nhật avatar.
+"""
+
 from __future__ import annotations
 
 import json
 import random
 from base64 import b64encode
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from django import forms
 from django.contrib import messages
@@ -12,6 +22,7 @@ from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db.models import Sum
 from django.http import (
     JsonResponse,
     HttpRequest,
@@ -19,7 +30,6 @@ from django.http import (
     HttpResponseBadRequest,
 )
 from django.shortcuts import get_object_or_404, render, redirect
-from django.db.models import Avg
 from django.templatetags.static import static
 from django.utils import timezone
 from django.utils.safestring import mark_safe
@@ -31,290 +41,226 @@ from .models import (
     ExamSession,
     ExamResult,
     SupplementaryResult,
-    UserProfile,  # dùng cho hồ sơ & avatar
+    UserProfile,
 )
 
 User = get_user_model()
 
 # ===========================
-# Scoring rules for supplementary questions
+# CÁC QUY TẮC VÀ HẰNG SỐ
 # ===========================
-SUPP_MAX_PER_QUESTION = 1.0   # mỗi câu phụ tối đa 1.0
-SUPP_MAX_COUNT = 2            # tối đa 2 câu phụ
-FINAL_CAP = 7.0               # tổng điểm cuối (nếu có điểm phụ) không vượt quá 7.0
+SUPP_MAX_PER_QUESTION = 1.0  # Điểm tối đa cho mỗi câu hỏi phụ
+SUPP_MAX_COUNT = 2  # Số lượng câu hỏi phụ tối đa được tính điểm
+FINAL_CAP = 7.0  # Điểm cuối cùng tối đa nếu có trả lời câu hỏi phụ
+
 
 # ===========================
-# Helpers
+# CÁC HÀM HỖ TRỢ (HELPERS)
 # ===========================
-def _json_body(request: HttpRequest) -> dict:
-    """Safe JSON loader for request.body; returns {} if empty/invalid."""
+
+def _json_body(request: HttpRequest) -> Dict[str, Any]:
+    """Tải nội dung JSON từ body của request một cách an toàn."""
     try:
         if request.body:
             return json.loads(request.body.decode("utf-8"))
-    except Exception:
+    except (json.JSONDecodeError, UnicodeDecodeError):
         pass
     return {}
 
-def _ensure_owner(session: ExamSession, user) -> None:
+
+def _ensure_owner(session: ExamSession, user: User) -> None:
+    """Kiểm tra người dùng hiện tại có phải là chủ sở hữu của phiên thi không."""
     if session.user_id != getattr(user, "id", None):
-        raise PermissionDenied("Bạn không có quyền với phiên thi này.")
+        raise PermissionDenied("Bạn không có quyền truy cập phiên thi này.")
 
-def _compute_scores(session):
+
+def _compute_scores(session: ExamSession) -> tuple[float, float, float]:
     """
-    Trả về (main_avg_on_10, supp_sum_on_2, final_total_display_on_10).
-
-    - Truy vấn trực tiếp qua ExamResult / SupplementaryResult để không phụ thuộc related_name.
-    - Mỗi câu phụ clamp 0..1, chỉ lấy tối đa 2 câu cao nhất.
-    - Nếu có điểm phụ => tổng điểm cuối cap 7.0.
-      Nếu KHÔNG có điểm phụ => tổng = điểm TB phần chính (tối đa 10).
+    Tính toán và trả về bộ 3 điểm của một phiên thi.
+    Xử lý phòng thủ với dữ liệu điểm không nhất quán từ DB.
     """
-    # Điểm phần chính
-    mains = list(ExamResult.objects.filter(session=session).only("score"))
-    if not mains:
-        return None, 0.0, 0.0
-    main_avg = sum((float(er.score) if er.score is not None else 0.0) for er in mains) / len(mains)
+    # 1. Tính điểm trung bình phần chính (Logic không đổi)
+    total_main_questions = session.questions.count()
+    if total_main_questions == 0:
+        total_main_questions = 3
 
-    # Điểm câu phụ
-    supp_scores = list(
-        SupplementaryResult.objects.filter(session=session).values_list("score", flat=True)
-    )
-    supp_scores = [max(0.0, min(float(s or 0.0), SUPP_MAX_PER_QUESTION)) for s in supp_scores]
-    supp_scores.sort(reverse=True)
-    supp_sum = sum(supp_scores[:SUPP_MAX_COUNT])
+    main_results = ExamResult.objects.filter(session=session)
+    sum_of_scores = main_results.aggregate(total=Sum('score'))['total'] or 0.0
+    main_avg = sum_of_scores / total_main_questions
 
-    # Tổng điểm hiển thị:
-    # - Có điểm phụ -> cap 7.0
-    # - Không có điểm phụ -> theo TB phần chính, tối đa 10
+    # 2. Tính tổng điểm câu hỏi phụ (lấy 2 câu cao nhất sau khi khử lặp và làm sạch dữ liệu)
+    supp_results_qs = SupplementaryResult.objects.filter(session=session)
+    best_scores_by_text = {}
+    for result in supp_results_qs:
+        key = (result.question_text or "").strip()
+        if not key:
+            continue
+
+        score = float(result.score or 0.0)
+
+        # ▼▼▼ LOGIC LÀM SẠCH DỮ LIỆU ĐƯỢC THÊM VÀO ▼▼▼
+        # Nếu điểm > 1.0, giả định đó là thang 10 và quy đổi về thang 1
+        if score > SUPP_MAX_PER_QUESTION:
+            score /= 10.0
+        # ▲▲▲ KẾT THÚC LOGIC LÀM SẠCH ▲▲▲
+
+        current_score = max(0.0, min(score, SUPP_MAX_PER_QUESTION))
+
+        if key not in best_scores_by_text or current_score > best_scores_by_text[key]:
+            best_scores_by_text[key] = current_score
+
+    unique_supp_scores = list(best_scores_by_text.values())
+    unique_supp_scores.sort(reverse=True)
+
+    supp_sum = sum(unique_supp_scores[:SUPP_MAX_COUNT])
+
+    # 3. Tính điểm cuối cùng (Logic không đổi)
     if supp_sum > 0:
-        final_total = min(FINAL_CAP, (main_avg or 0.0) + supp_sum)
+        final_total = min(FINAL_CAP, main_avg + supp_sum)
     else:
-        final_total = min(10.0, (main_avg or 0.0))
+        final_total = min(10.0, main_avg)
 
     return main_avg, supp_sum, final_total
 
-def _dedupe_supp_for_display(qs) -> List[SupplementaryResult]:
+
+# qna/views.py
+
+def _dedupe_supp_for_display(qs: SupplementaryResult) -> List[SupplementaryResult]:
     """
-    Khử lặp câu phụ theo question_text để hiển thị lịch sử.
-    Nếu một câu xuất hiện nhiều bản ghi, giữ bản có điểm cao nhất.
-    Trả về tối đa 2 mục theo thứ tự điểm giảm dần.
+    Khử lặp các câu hỏi phụ và làm sạch điểm để hiển thị.
     """
     best_by_text = {}
-    for s in qs:
-        key = (s.question_text or "").strip()
-        cur = best_by_text.get(key)
-        if cur is None or float(s.score or 0) > float(cur.score or 0):
-            best_by_text[key] = s
+    for result in qs:
+        key = (result.question_text or "").strip()
+        if not key:
+            continue
+
+        # ▼▼▼ LOGIC LÀM SẠCH DỮ LIỆU ĐƯỢC THÊM VÀO ▼▼▼
+        # Tạo một bản sao để không thay đổi đối tượng gốc trong queryset
+        cleaned_result = result
+        score = float(cleaned_result.score or 0.0)
+
+        # Nếu điểm > 1.0, giả định đó là thang 10 và quy đổi về thang 1
+        if score > SUPP_MAX_PER_QUESTION:
+            cleaned_result.score = score / 10.0
+        # ▲▲▲ KẾT THÚC LOGIC LÀM SẠCH ▲▲▲
+
+        current_best = best_by_text.get(key)
+        if current_best is None or float(cleaned_result.score or 0) > float(current_best.score or 0):
+            best_by_text[key] = cleaned_result
+
     items = list(best_by_text.values())
     items.sort(key=lambda x: float(x.score or 0), reverse=True)
     return items[:SUPP_MAX_COUNT]
 
 # ===========================
-# Registration (Đăng ký)
+# FORM ĐĂNG KÝ
 # ===========================
+
 class RegistrationForm(forms.Form):
-    # Các trường bắt buộc có dấu * đỏ (hiển thị trong label)
+    """Form xử lý việc đăng ký tài khoản mới."""
     full_name = forms.CharField(
         label=mark_safe('Họ và tên <span class="text-red-500">*</span>'),
-        required=True,
         max_length=150,
-        widget=forms.TextInput(attrs={
-            "class": "appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-400",
-            "placeholder": "VD: Nguyễn Văn A",
-            "autocomplete": "name",
-        }),
-        help_text="",
+        widget=forms.TextInput(attrs={"placeholder": "VD: Nguyễn Văn A", "autocomplete": "name"})
     )
     username = forms.CharField(
         label=mark_safe('Tên đăng nhập (Mã SV) <span class="text-red-500">*</span>'),
-        required=True,
         max_length=150,
-        widget=forms.TextInput(attrs={
-            "class": "appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-400",
-            "placeholder": "Mã SV hoặc tên đăng nhập",
-            "autocomplete": "username",
-        }),
-        help_text="Phải là duy nhất.",
+        widget=forms.TextInput(attrs={"placeholder": "Mã SV hoặc tên đăng nhập", "autocomplete": "username"}),
+        help_text="Phải là duy nhất."
     )
     class_name = forms.CharField(
         label=mark_safe('Lớp <span class="text-red-500">*</span>'),
-        required=True,
         max_length=100,
-        widget=forms.TextInput(attrs={
-            "class": "appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-400",
-            "placeholder": "VD: K25CNTT",
-            "autocomplete": "organization",
-        }),
-        help_text="",
+        widget=forms.TextInput(attrs={"placeholder": "VD: K25CNTT", "autocomplete": "organization"})
     )
-    # (email/khoa không bắt buộc – bạn có thể bỏ nếu muốn)
     email = forms.EmailField(
         label='Email',
         required=False,
-        widget=forms.EmailInput(attrs={
-            "class": "appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-400",
-            "placeholder": "ten@sv.duytan.edu.vn",
-            "autocomplete": "email",
-        }),
-        help_text="(Không bắt buộc)",
+        widget=forms.EmailInput(attrs={"placeholder": "ten@sv.duytan.edu.vn", "autocomplete": "email"}),
+        help_text="(Không bắt buộc)"
     )
     faculty = forms.CharField(
         label='Khoa',
         required=False,
         max_length=150,
-        widget=forms.TextInput(attrs={
-            "class": "appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-400",
-            "placeholder": "VD: Công nghệ thông tin",
-        }),
-        help_text="(Không bắt buộc)",
+        widget=forms.TextInput(attrs={"placeholder": "VD: Công nghệ thông tin"}),
+        help_text="(Không bắt buộc)"
     )
     password = forms.CharField(
         label=mark_safe('Mật khẩu <span class="text-red-500">*</span>'),
-        required=True,
         strip=False,
-        widget=forms.PasswordInput(attrs={
-            "class": "appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-400",
-            "placeholder": "••••••••",
-            "autocomplete": "new-password",
-        }),
-        help_text="Tối thiểu 8 ký tự, nên có chữ hoa, chữ thường, số và ký tự đặc biệt.",
+        widget=forms.PasswordInput(attrs={"placeholder": "••••••••", "autocomplete": "new-password"}),
+        help_text="Tối thiểu 8 ký tự."
     )
     password2 = forms.CharField(
         label=mark_safe('Nhập lại mật khẩu <span class="text-red-500">*</span>'),
-        required=True,
         strip=False,
-        widget=forms.PasswordInput(attrs={
-            "class": "appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-400",
-            "placeholder": "••••••••",
-            "autocomplete": "new-password",
-        }),
-        help_text="Phải trùng với mật khẩu.",
+        widget=forms.PasswordInput(attrs={"placeholder": "••••••••", "autocomplete": "new-password"}),
+        help_text="Phải trùng với mật khẩu."
     )
 
-    @staticmethod
-    def _nonblank(value: str) -> str:
-        if value is None:
-            raise ValidationError("Trường này là bắt buộc.")
-        v = value.strip()
-        if not v:
-            raise ValidationError("Trường này là bắt buộc.")
-        return v
-
-    def clean_full_name(self):
-        return self._nonblank(self.cleaned_data.get("full_name"))
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.update({
+                "class": "appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-400"
+            })
 
     def clean_username(self):
-        username = self._nonblank(self.cleaned_data.get("username"))
+        """Kiểm tra tên đăng nhập không được trống và phải là duy nhất."""
+        username = self.cleaned_data.get("username", "").strip()
+        if not username:
+            raise ValidationError("Tên đăng nhập là bắt buộc.")
         if User.objects.filter(username=username).exists():
-            raise ValidationError("Tên đăng nhập đã tồn tại.")
+            raise ValidationError("Tên đăng nhập này đã tồn tại.")
         return username
 
-    def clean_class_name(self):
-        return self._nonblank(self.cleaned_data.get("class_name"))
-
     def clean(self):
-        cleaned = super().clean()
-        pwd = (cleaned.get("password") or "").strip()
-        pwd2 = (cleaned.get("password2") or "").strip()
+        """Kiểm tra mật khẩu và các ràng buộc toàn form."""
+        cleaned_data = super().clean()
+        password = cleaned_data.get("password")
+        password2 = cleaned_data.get("password2")
 
-        if not pwd:
-            self.add_error("password", "Trường này là bắt buộc.")
-        if not pwd2:
-            self.add_error("password2", "Trường này là bắt buộc.")
-        if pwd and pwd2 and pwd != pwd2:
+        if password and password2 and password != password2:
             self.add_error("password2", "Mật khẩu nhập lại không khớp.")
 
-        username = cleaned.get("username") or ""
-        if pwd:
-            temp_user = User(username=username)
+        if password:
             try:
-                validate_password(pwd, user=temp_user)
+                validate_password(password, user=User(username=cleaned_data.get("username")))
             except ValidationError as e:
                 self.add_error("password", e)
-        return cleaned
 
-# (ĐÃ LOẠI BỎ form cập nhật Khoa & Email – chỉ hiển thị read-only trong profile)
+        return cleaned_data
 
-def _try_set_profile_fields(
-    profile: UserProfile,
-    *,
-    full_name: Optional[str] = None,
-    class_name: Optional[str] = None,
-    faculty: Optional[str] = None,
-    student_id: Optional[str] = None,
-) -> None:
-    """Gán an toàn các field nếu tồn tại trong UserProfile."""
-    changed_fields = []
 
-    if full_name is not None and hasattr(profile, "full_name"):
-        try:
-            profile.full_name = full_name
-            changed_fields.append("full_name")
-        except Exception:
-            pass
-
-    if class_name is not None and hasattr(profile, "class_name"):
-        try:
-            profile.class_name = class_name
-            changed_fields.append("class_name")
-        except Exception:
-            pass
-
-    if faculty is not None and hasattr(profile, "faculty"):
-        try:
-            profile.faculty = faculty
-            changed_fields.append("faculty")
-        except Exception:
-            pass
-
-    if student_id is not None and hasattr(profile, "student_id"):
-        try:
-            profile.student_id = student_id
-            changed_fields.append("student_id")
-        except Exception:
-            pass
-
-    if changed_fields:
-        try:
-            profile.save(update_fields=changed_fields)
-        except Exception:
-            profile.save()
+# ===========================
+# CÁC VIEW HIỂN THỊ TRANG (PAGES)
+# ===========================
 
 def register_view(request: HttpRequest) -> HttpResponse:
-    """
-    Đăng ký:
-    - Lưu full_name/class_name/student_id vào UserProfile.
-    - Tự đăng nhập và chuyển về dashboard.
-    """
+    """Xử lý trang đăng ký tài khoản."""
     if request.user.is_authenticated:
         return redirect("qna:dashboard")
 
     if request.method == "POST":
         form = RegistrationForm(request.POST)
         if form.is_valid():
-            full_name = form.cleaned_data["full_name"].strip()
-            username = form.cleaned_data["username"].strip()
-            class_name = form.cleaned_data["class_name"].strip()
-            email = (form.cleaned_data.get("email") or "").strip()
-            faculty = (form.cleaned_data.get("faculty") or "").strip()
-            password = form.cleaned_data["password"]
-
-            user = User.objects.create_user(username=username, password=password, email=email or None)
-            try:
-                user.first_name = full_name
-                if email:
-                    user.email = email
-                user.save(update_fields=["first_name", "email"] if email else ["first_name"])
-            except Exception:
-                pass
+            data = form.cleaned_data
+            user = User.objects.create_user(
+                username=data["username"],
+                password=data["password"],
+                email=data.get("email", ""),
+                first_name=data["full_name"]
+            )
 
             profile, _ = UserProfile.objects.get_or_create(user=user)
-            _try_set_profile_fields(
-                profile,
-                full_name=full_name,
-                class_name=class_name,
-                faculty=faculty or None,
-                student_id=username,
-            )
+            profile.full_name = data["full_name"]
+            profile.class_name = data["class_name"]
+            profile.student_id = data["username"]
+            profile.faculty = data.get("faculty", "")
+            profile.save()
 
             login(request, user)
             messages.success(request, "Đăng ký thành công. Chào mừng bạn!")
@@ -324,281 +270,252 @@ def register_view(request: HttpRequest) -> HttpResponse:
 
     return render(request, "registration/register.html", {"form": form})
 
-# ===========================
-# Profile helpers
-# ===========================
-def _avatar_data_url_from_profile(profile: UserProfile) -> str:
-    """
-    Tạo data-url từ blob trong DB nếu có (ưu tiên).
-    Fallback: nếu còn FileField `profile_image` -> dùng .url
-    Cuối cùng: trả về ảnh mặc định.
-    """
-    # Ưu tiên blob trong DB
-    blob = getattr(profile, "profile_image_blob", None)
-    if blob:
-        try:
-            mime = getattr(profile, "profile_image_mime", "") or "image/jpeg"
-            return f"data:{mime};base64,{b64encode(blob).decode('ascii')}"
-        except Exception:
-            pass
 
-    # Fallback: nếu có FileField cũ
-    try:
-        if getattr(profile, "profile_image", None) and hasattr(profile.profile_image, "url"):
-            return profile.profile_image.url
-    except Exception:
-        pass
-
-    # Default
-    return static("images/default_avatar.png")
-
-def _collect_profile_data(user) -> dict:
-    """
-    Thu thập dữ liệu hồ sơ để hiển thị (read-only):
-    - Họ và tên / Lớp / MSSV lấy từ UserProfile đã set khi đăng ký.
-    - Avatar lấy từ blob trong DB -> data URL, fallback file/url hoặc ảnh mặc định.
-    """
-    profile, _ = UserProfile.objects.get_or_create(user=user)
-
-    full_name = getattr(profile, "full_name", None) or (user.first_name or "")
-    class_name = getattr(profile, "class_name", None) or ""
-    faculty = getattr(profile, "faculty", "") or ""  # có thể không dùng nữa
-    student_id = getattr(profile, "student_id", "") or user.username
-
-    avatar_url = _avatar_data_url_from_profile(profile)
-
-    return {
-        "username": user.username,
-        "email": getattr(user, "email", "") or "",
-        "full_name": full_name,
-        "class_name": class_name,
-        "date_joined": getattr(user, "date_joined", None),
-        "last_login": getattr(user, "last_login", None),
-        "avatar_url": avatar_url,
-        "faculty": faculty,
-        "student_id": student_id,
-        "profile": profile,
-        # Cờ cho template: không hiển thị form Khoa/Email nữa
-        "allow_edit_email_faculty": False,
-    }
-
-# ===========================
-# Pages
-# ===========================
 @login_required
 def dashboard_view(request: HttpRequest) -> HttpResponse:
-    """Trang chủ: Chào mừng và liệt kê các môn thi."""
+    """Hiển thị trang dashboard chính sau khi đăng nhập."""
     subjects = Subject.objects.all().order_by("name")
     recent_sessions = (
         ExamSession.objects.filter(user=request.user)
         .select_related("subject")
-        .order_by("-created_at")[:10]
+        .order_by("-created_at")[:5]
     )
-
-    # Lấy tên đầy đủ để hiển thị lời chào
-    profile_data = _collect_profile_data(request.user)
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
 
     return render(request, "qna/dashboard.html", {
         "subjects": subjects,
         "recent_sessions": recent_sessions,
-        "full_name": profile_data.get("full_name")
+        "full_name": profile.full_name or request.user.first_name,
     })
 
-@login_required
-def profile_view(request: HttpRequest) -> HttpResponse:
-    """
-    Trang hồ sơ: Chỉ hiển thị thông tin (read-only) & nút upload avatar.
-    - KHÔNG còn form cập nhật Khoa/Email ở đây.
-    - Upload ảnh dùng endpoint update_profile_image (FormData).
-    """
-    ctx = _collect_profile_data(request.user)
-    ctx["form"] = None
-    return render(request, "qna/profile.html", ctx)
+
+# qna/views.py
 
 @login_required
 def history_view(request: HttpRequest) -> HttpResponse:
+    """Hiển thị trang lịch sử các phiên thi của người dùng."""
     sessions = (
         ExamSession.objects.filter(user=request.user)
         .select_related("subject")
         .order_by("-created_at")
     )
     for s in sessions:
-        m, supp, t = _compute_scores(s)
-        s.main_avg = m or 0.0
-        s.supp_sum = supp or 0.0
-        s.final_total = t or 0.0  # hiển thị /10 (nếu có điểm phụ thì đã cap 7)
+        main_avg, supp_sum, final_total = _compute_scores(s)
+        s.main_avg = main_avg
+        s.supp_sum = supp_sum
+        # ▼▼▼ THAY ĐỔI Ở ĐÂY ▼▼▼
+        # Đổi tên thuộc tính để tránh xung đột và làm rõ ý nghĩa.
+        s.calculated_final_score = final_total
+        # ▲▲▲ KẾT THÚC THAY ĐỔI ▲▲▲
+
     return render(request, "qna/history.html", {"sessions": sessions})
 
 @login_required
 def history_detail_view(request: HttpRequest, session_id: int) -> HttpResponse:
+    """Hiển thị chi tiết kết quả của một phiên thi."""
     session = get_object_or_404(
         ExamSession.objects.select_related("subject", "user"),
         pk=session_id,
     )
     _ensure_owner(session, request.user)
 
-    results = (
+    main_results = (
         ExamResult.objects.filter(session=session)
         .select_related("question")
         .order_by("question_id")
     )
-    supp_qs = SupplementaryResult.objects.filter(session=session).order_by("created_at")
-    supp_results = SupplementaryResult.objects.filter(session=session)
-
-    # Thêm vòng lặp để tính toán scaled_score
-    for result in supp_results:
-        if result.max_score > 0:
-            # Tính toán điểm trên thang 1
-            result.scaled_score = result.score / result.max_score
-        else:
-            result.scaled_score = 0
+    supp_results_qs = SupplementaryResult.objects.filter(session=session)
+    supp_results_display = _dedupe_supp_for_display(supp_results_qs)
 
     main_avg, supp_sum, final_total = _compute_scores(session)
 
     return render(request, "qna/history_detail.html", {
         "session": session,
-        "results": results,
-        "supp_results": supp_results,
+        "results": main_results,
+        "supp_results": supp_results_display,
         "main_avg": main_avg,
         "supp_sum": supp_sum,
         "final_total": final_total,
     })
 
 
-# ===========================
-# Exam flow
-# ===========================
 @login_required
 def exam_view(request: HttpRequest, subject_code: str) -> HttpResponse:
+    """Bắt đầu một phiên thi mới cho một môn học."""
     subject = get_object_or_404(Subject, subject_code=subject_code)
-    main_pool_qs = Question.objects.filter(subject=subject, is_supplementary=False)
 
-    selected_questions = list(main_pool_qs.order_by("?")[:3])
+    main_questions = list(
+        Question.objects.filter(subject=subject, is_supplementary=False).order_by("?")[:3]
+    )
+
+    if not main_questions:
+        messages.error(request, f"Môn {subject.name} chưa có câu hỏi. Vui lòng liên hệ quản trị viên.")
+        return redirect("qna:dashboard")
 
     session = ExamSession.objects.create(user=request.user, subject=subject)
-    if selected_questions:
-        try:
-            session.questions.set(selected_questions)
-        except Exception:
-            pass
+    session.questions.set(main_questions)
 
-    remaining_main = main_pool_qs.exclude(
-        id__in=[q.id for q in selected_questions]
-    ).values("id", "question_text")
-    barem = [{"id": r["id"], "question": r["question_text"]} for r in remaining_main]
+    remaining_main_qs = Question.objects.filter(
+        subject=subject, is_supplementary=False
+    ).exclude(id__in=[q.id for q in main_questions])
+
+    barem = [{"id": q.id, "question": q.question_text} for q in remaining_main_qs]
 
     return render(request, "qna/exam.html", {
         "subject": subject,
-        "selected_questions": selected_questions,
+        "selected_questions": main_questions,
         "session": session,
         "barem_json": json.dumps(barem, ensure_ascii=False),
     })
 
+
 # ===========================
-# APIs used by exam flow
+# HỒ SƠ VÀ AVATAR
 # ===========================
+
+def _get_avatar_data_url(profile: UserProfile) -> str:
+    """Tạo chuỗi data URL cho avatar từ DB blob hoặc trả về ảnh mặc định."""
+    if profile.profile_image_blob:
+        try:
+            mime = profile.profile_image_mime or "image/jpeg"
+            encoded_blob = b64encode(profile.profile_image_blob).decode("ascii")
+            return f"data:{mime};base64,{encoded_blob}"
+        except Exception:
+            pass
+    return static("images/default_avatar.png")
+
+
+@login_required
+def profile_view(request: HttpRequest) -> HttpResponse:
+    """Hiển thị trang hồ sơ người dùng (chỉ đọc)."""
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+
+    context = {
+        "username": request.user.username,
+        "email": request.user.email,
+        "full_name": profile.full_name or request.user.first_name,
+        "class_name": profile.class_name,
+        "student_id": profile.student_id,
+        "date_joined": request.user.date_joined,
+        "last_login": request.user.last_login,
+        "avatar_url": _get_avatar_data_url(profile),
+    }
+    return render(request, "qna/profile.html", context)
+
+
+@login_required
+@require_POST
+def update_profile_image(request: HttpRequest) -> JsonResponse:
+    """API để tải lên và cập nhật ảnh đại diện mới, lưu dưới dạng blob."""
+    file_obj = request.FILES.get('profile_image')
+    if not file_obj:
+        return JsonResponse({"success": False, "error": "Không tìm thấy file ảnh."}, status=400)
+
+    if file_obj.size > 5 * 1024 * 1024:  # Giới hạn 5MB
+        return JsonResponse({"success": False, "error": "Kích thước ảnh không được vượt quá 5MB."}, status=400)
+
+    content = file_obj.read()
+    mime = file_obj.content_type
+
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+
+    profile.profile_image_blob = content
+    profile.profile_image_mime = mime
+    profile.save()
+
+    data_url = f"data:{mime};base64,{b64encode(content).decode('ascii')}"
+    return JsonResponse({"success": True, "image_data_url": data_url})
+
+
+# ===========================
+# CÁC API CHO LUỒNG THI
+# ===========================
+
 @login_required
 @require_POST
 def save_exam_result(request: HttpRequest) -> JsonResponse:
-    """
-    Lưu kết quả một câu hỏi CHÍNH.
-    Body JSON:
-      { session_id, question_id, transcript, score, feedback?, analysis? (list|dict) }
-    """
+    """API để lưu kết quả của một câu hỏi chính."""
     data = _json_body(request)
     session_id = data.get("session_id")
     question_id = data.get("question_id")
-    transcript = data.get("transcript") or ""
     score = data.get("score")
-    feedback = data.get("feedback")
-    analysis = data.get("analysis")
 
-    if session_id is None or question_id is None or score is None:
-        return HttpResponseBadRequest("Thiếu tham số.")
+    if not all([session_id, question_id, score is not None]):
+        return HttpResponseBadRequest("Thiếu các tham số bắt buộc (session_id, question_id, score).")
 
     session = get_object_or_404(ExamSession, pk=session_id)
     _ensure_owner(session, request.user)
     question = get_object_or_404(Question, pk=question_id, is_supplementary=False)
 
-    er, created = ExamResult.objects.update_or_create(
-        session=session, question=question,
+    result, created = ExamResult.objects.update_or_create(
+        session=session,
+        question=question,
         defaults={
-            "transcript": transcript,
+            "transcript": data.get("transcript", ""),
             "score": float(score),
-            "feedback": feedback,
-            "analysis": analysis,
+            "feedback": data.get("feedback"),
+            "analysis": data.get("analysis"),
             "answered_at": timezone.now(),
         }
     )
-    return JsonResponse({
-        "status": "ok",
-        "created": created,
-        "result_id": er.id,
-    })
+    return JsonResponse({"status": "ok", "created": created, "result_id": result.id})
+
 
 @login_required
 @require_POST
 def get_supplementary_for_session(request: HttpRequest, session_id: int) -> JsonResponse:
+    """API để lấy ngẫu nhiên 2 câu hỏi phụ cho một phiên thi."""
     session = get_object_or_404(ExamSession.objects.select_related("subject"), pk=session_id)
     _ensure_owner(session, request.user)
 
-    pool = list(Question.objects.filter(subject=session.subject, is_supplementary=True))
-    random.shuffle(pool)
-    picked = pool[:2]
-    items = [{"id": q.id, "question": q.question_text} for q in picked]
+    supp_pool = list(Question.objects.filter(subject=session.subject, is_supplementary=True))
+    random.shuffle(supp_pool)
+
+    picked_questions = supp_pool[:SUPP_MAX_COUNT]
+    items = [{"id": q.id, "question": q.question_text} for q in picked_questions]
+
     return JsonResponse({"status": "ok", "items": items})
+
 
 @login_required
 @require_POST
 def save_supplementary_result(request: HttpRequest) -> JsonResponse:
-    """
-    Body JSON:
-      { session_id, question_text, transcript, score, max_score?, feedback?, analysis? }
-
-    Quy tắc:
-      - Tối đa 2 câu phụ mỗi phiên.
-      - Nếu client/worker gửi điểm thang 10 -> scale về 1.0 (mỗi câu tối đa 1.0).
-    """
+    """API để lưu kết quả của một câu hỏi phụ."""
     data = _json_body(request)
     session_id = data.get("session_id")
     question_text = (data.get("question_text") or "").strip()
-    transcript = data.get("transcript") or ""
     raw_score = data.get("score")
-    raw_max = data.get("max_score")
-    feedback = data.get("feedback")
-    analysis = data.get("analysis")
 
-    if session_id is None or not question_text or raw_score is None:
-        return HttpResponseBadRequest("Thiếu tham số.")
+    if not all([session_id, question_text, raw_score is not None]):
+        return HttpResponseBadRequest("Thiếu tham số (session_id, question_text, score).")
 
     session = get_object_or_404(ExamSession, pk=session_id)
     _ensure_owner(session, request.user)
 
     if SupplementaryResult.objects.filter(session=session).count() >= SUPP_MAX_COUNT:
-        return JsonResponse({"status": "error", "message": f"Tối đa {SUPP_MAX_COUNT} câu hỏi phụ cho mỗi phiên."}, status=400)
+        return JsonResponse(
+            {"status": "error", "message": f"Đã đạt số lượng câu hỏi phụ tối đa ({SUPP_MAX_COUNT})."},
+            status=400,
+        )
 
     try:
-        rs = float(raw_score)
+        score_val = float(raw_score)
+        max_score_val = float(data.get("max_score", 10.0))
+        if max_score_val <= 0: max_score_val = 10.0
     except (TypeError, ValueError):
-        rs = 0.0
-    try:
-        rm = float(raw_max) if raw_max is not None else 10.0
-    except (TypeError, ValueError):
-        rm = 10.0
-    if rm <= 0:
-        rm = 10.0
+        return HttpResponseBadRequest("Giá trị điểm không hợp lệ.")
 
-    scaled = (rs / rm) * SUPP_MAX_PER_QUESTION
-    score_0_to_1 = max(0.0, min(scaled, SUPP_MAX_PER_QUESTION))
+    normalized_score = (score_val / max_score_val) * SUPP_MAX_PER_QUESTION
+    final_score = max(0.0, min(normalized_score, SUPP_MAX_PER_QUESTION))
 
     sr = SupplementaryResult.objects.create(
         session=session,
         question_text=question_text,
-        transcript=transcript,
-        score=score_0_to_1,               # 0..1
-        max_score=SUPP_MAX_PER_QUESTION,  # 1.0
-        feedback=feedback,
-        analysis=analysis,
+        transcript=data.get("transcript", ""),
+        score=final_score,
+        max_score=SUPP_MAX_PER_QUESTION,
+        feedback=data.get("feedback"),
+        analysis=data.get("analysis"),
     )
 
     main_avg, supp_sum, final_total = _compute_scores(session)
@@ -607,100 +524,23 @@ def save_supplementary_result(request: HttpRequest) -> JsonResponse:
         "supplementary_result_id": sr.id,
         "main_avg": main_avg,
         "supp_sum": supp_sum,
-        "final_total": final_total
+        "final_total": final_total,
     })
+
 
 @login_required
 @require_POST
 def finalize_session_view(request: HttpRequest, session_id: int) -> JsonResponse:
+    """API để hoàn thành một phiên thi."""
     session = get_object_or_404(ExamSession, pk=session_id)
     _ensure_owner(session, request.user)
 
-    main_avg, supp_sum, total = _compute_scores(session)
-    if main_avg is None:
-        return JsonResponse({"status": "error", "message": "Chưa có kết quả nào của phần chính."}, status=400)
+    # Dùng hàm tính điểm đã được cập nhật
+    main_avg, _, total_score = _compute_scores(session)
 
     session.is_completed = True
     session.completed_at = timezone.now()
-    session.final_score = total  # nếu có điểm phụ thì đã cap 7; nếu không, là TB chính (tối đa 10)
+    session.final_score = total_score
     session.save(update_fields=["is_completed", "completed_at", "final_score"])
 
     return JsonResponse({"status": "success", "final_score": session.final_score})
-
-# ===========================
-# Legacy supplementary APIs
-# ===========================
-@login_required
-@require_GET
-def get_supplementary_questions_api(request: HttpRequest, session_id: int) -> JsonResponse:
-    session = get_object_or_404(ExamSession.objects.select_related("subject"), pk=session_id)
-    _ensure_owner(session, request.user)
-    supp_qs = Question.objects.filter(subject=session.subject, is_supplementary=True)
-    items = [{"id": q.id, "question": q.question_text} for q in supp_qs]
-    return JsonResponse({"status": "ok", "items": items})
-
-@login_required
-@require_GET
-def get_supplementary_questions(request: HttpRequest) -> JsonResponse:
-    session_id = request.GET.get("session_id")
-    subject_code = request.GET.get("subject_code")
-
-    subject = None
-    if session_id:
-        session = get_object_or_404(ExamSession.objects.select_related("subject"), pk=int(session_id))
-        _ensure_owner(session, request.user)
-        subject = session.subject
-    elif subject_code:
-        subject = get_object_or_404(Subject, subject_code=subject_code)
-    else:
-        return HttpResponseBadRequest("Thiếu session_id hoặc subject_code.")
-
-    pool = list(Question.objects.filter(subject=subject, is_supplementary=True))
-    random.shuffle(pool)
-    picked = [{"id": q.id, "question": q.question_text} for q in pool[:2]]
-    return JsonResponse({"status": "ok", "items": picked})
-
-# ===========================
-# Profile (upload avatar -> lưu CSDL)
-# ===========================
-@login_required
-@require_POST
-def update_profile_image(request: HttpRequest) -> JsonResponse:
-    """
-    Nhận FormData('profile_image') và lưu NHỊ PHÂN vào CSDL (UserProfile.profile_image_blob).
-    Trả về JSON: { success, image_data_url?, error? }
-    """
-    file_obj = request.FILES.get('profile_image')
-    if not file_obj:
-        return JsonResponse({"success": False, "error": "Thiếu file 'profile_image'."}, status=400)
-
-    # Giới hạn dung lượng cơ bản (vd 5MB)
-    if file_obj.size and file_obj.size > 5 * 1024 * 1024:
-        return JsonResponse({"success": False, "error": "Ảnh quá lớn (tối đa 5MB)."}, status=400)
-
-    content = file_obj.read()
-    mime = getattr(file_obj, "content_type", None) or "image/jpeg"
-
-    profile, _ = UserProfile.objects.get_or_create(user=request.user)
-
-    # Xoá file cũ ở FileField (nếu có) – tránh rác ổ đĩa
-    try:
-        if getattr(profile, "profile_image", None) and getattr(profile.profile_image, "name", ""):
-            profile.profile_image.delete(save=False)
-    except Exception:
-        pass
-
-    # Lưu blob vào DB
-    if hasattr(profile, "profile_image_blob"):
-        profile.profile_image_blob = content
-        if hasattr(profile, "profile_image_mime"):
-            profile.profile_image_mime = mime
-        try:
-            profile.save(update_fields=["profile_image_blob", "profile_image_mime"] if hasattr(profile, "profile_image_mime") else ["profile_image_blob"])
-        except Exception:
-            profile.save()
-    else:
-        return JsonResponse({"success": False, "error": "Thiếu field profile_image_blob trong UserProfile."}, status=500)
-
-    data_url = f"data:{mime};base64,{b64encode(content).decode('ascii')}"
-    return JsonResponse({"success": True, "image_data_url": data_url})

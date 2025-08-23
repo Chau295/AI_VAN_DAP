@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load static %}
+{% load tz %}
 
 {% block title %}Lịch sử bài thi{% endblock %}
 
@@ -35,19 +36,19 @@
             {{ session.subject.name }}
           </td>
           <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-            {{ session.created_at|date:"d/m/Y H:i" }}
+            {{ session.created_at|timezone:"Asia/Ho_Chi_Minh"|date:"d/m/Y H:i" }}
           </td>
           <td class="px-6 py-4 whitespace-nowrap text-sm">
             {% if session.is_completed %}
               <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Đã hoàn thành</span>
-              <div class="text-gray-500 text-xs mt-1">{{ session.completed_at|date:"d/m/Y H:i" }}</div>
+              <div class="text-gray-500 text-xs mt-1">{{ session.completed_at|timezone:"Asia/Ho_Chi_Minh"|date:"d/m/Y H:i" }}</div>
             {% else %}
               <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">Đang làm</span>
             {% endif %}
           </td>
           <!-- CHỈ GIỮ Tổng điểm cuối -->
           <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-blue-600">
-            {{ session.final_total|default:0|floatformat:2 }} / 10
+            {{ session.calculated_final_score|default:0|floatformat:2 }} / 10
           </td>
           <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-center">
             <a href="{% url 'qna:history_detail' session.id %}" class="inline-flex items-center px-3 py-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700">

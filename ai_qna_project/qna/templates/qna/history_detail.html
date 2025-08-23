@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load static %}
+{% load tz %}
 
 {% block title %}Kết quả phiên thi #{{ session.id }} — {{ session.subject.name }}{% endblock %}
 
@@ -15,7 +16,7 @@
         <span class="font-normal">{{ session.user.get_full_name|default:session.user.username }}</span>
       </p>
       <p class="text-sm text-gray-500 mt-1">
-        {% if session.completed_at %}Hoàn thành lúc: {{ session.completed_at|date:"H:i, d/m/Y" }}{% else %}Chưa hoàn thành{% endif %}
+        {% if session.completed_at %}Hoàn thành lúc: {{ session.completed_at|timezone:"Asia/Ho_Chi_Minh"|date:"H:i, d/m/Y" }}{% else %}Chưa hoàn thành{% endif %}
       </p>
     </div>
     <a href="{% url 'qna:history' %}" class="mt-4 sm:mt-0 inline-flex items-center px-4 py-2 rounded-lg border border-gray-300 text-sm font-semibold bg-white text-gray-700 hover:bg-gray-50 transition-colors shadow-sm">
@@ -31,9 +32,8 @@
       </div>
       <p class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Điểm Phần Chính</p>
       <p class="text-5xl font-extrabold text-blue-600 my-1">
-        {% if main_avg is not None %}{{ main_avg|floatformat:2 }}{% else %}N/A{% endif %}
+        {% if main_avg is not None %}{{ main_avg|floatformat:2 }}<span class="text-3xl font-semibold text-gray-500">/10</span>{% else %}N/A{% endif %}
       </p>
-      <p class="text-gray-500 text-sm">(Điểm trung bình / 10)</p>
     </div>
 
     <div class="bg-white p-6 rounded-xl shadow-lg border-t-4 border-green-500 text-center transform hover:-translate-y-1 transition-transform duration-300">
@@ -53,9 +53,8 @@
       </div>
       <p class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Điểm Cuối Cùng</p>
       <p class="text-5xl font-extrabold text-indigo-600 my-1">
-        {{ final_total|default:0|floatformat:2 }}
+        {{ final_total|default:0|floatformat:2 }}<span class="text-3xl font-semibold text-gray-500">/10</span>
       </p>
-      <p class="text-gray-500 text-sm">(Đã áp dụng giới hạn 7.0)</p>
     </div>
   </div>
 
@@ -80,7 +79,7 @@
               <p class="text-gray-700"><i class="fas fa-microphone-alt w-5 text-gray-400 mr-2"></i><span class="font-semibold">Bạn đã trả lời:</span> <em class="text-gray-600">"{{ result.transcript }}"</em></p>
             {% endif %}
             {% if result.feedback %}
-              <p class="text-gray-700"><i class="fas fa-comment-dots w-5 text-gray-400 mr-2"></i><span class="font-semibold">Nhận xét từ AI:</span> {{ result.feedback }}</p>
+              <p class="text-gray-700"><i class="fas fa-comment-dots w-5 text-gray-400 mr-2"></i><span class="font-semibold">Nhận xét:</span> {{ result.feedback }}</p>
             {% endif %}
           </div>
           {% endif %}
@@ -102,7 +101,7 @@
             </p>
             <div class="flex-shrink-0 text-right bg-green-50 px-3 py-1 rounded-full">
               <p class="text-xl font-bold text-green-700">
-                +{{ result.scaled_score|default:0|floatformat:2 }}<span class="text-sm font-medium text-green-500">/1.0</span>
+                +{{ result.score|default:0|floatformat:2 }}<span class="text-sm font-medium text-green-500">/1.0</span>
               </p>
             </div>
           </div>
@@ -112,7 +111,7 @@
               <p class="text-gray-700"><i class="fas fa-microphone-alt w-5 text-gray-400 mr-2"></i><span class="font-semibold">Bạn đã trả lời:</span> <em class="text-gray-600">"{{ result.transcript }}"</em></p>
             {% endif %}
             {% if result.feedback %}
-              <p class="text-gray-700"><i class="fas fa-comment-dots w-5 text-gray-400 mr-2"></i><span class="font-semibold">Nhận xét từ AI:</span> {{ result.feedback }}</p>
+              <p class="text-gray-700"><i class="fas fa-comment-dots w-5 text-gray-400 mr-2"></i><span class="font-semibold">Nhận xét:</span> {{ result.feedback }}</p>
             {% endif %}
           </div>
           {% endif %}
