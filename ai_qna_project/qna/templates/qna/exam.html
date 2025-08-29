@@ -299,11 +299,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (timeLeft <= 0 && !state.examFinished) {
         state.examFinished = true;
         clearInterval(mainTimerInterval);
-        alert('Đã hết thời gian làm bài!');
-        if (state.suppInProgress) {
-          finalizeAndShowResult();
+        alert('Đã hết thời gian làm bài! Câu trả lời hiện tại (nếu có) sẽ được tự động nộp.');
+
+        if (state.mediaRecorder && state.mediaRecorder.state === 'recording') {
+          // Dừng và nộp bài. Kết quả sẽ được xử lý trong handleExamResult
+          stopRecording();
         } else {
-          onFinishMainExam();
+          // Không ghi âm, kết thúc ngay
+          finalizeAndShowResult(true);
         }
       }
     };
@@ -333,6 +336,17 @@ document.addEventListener('DOMContentLoaded', () => {
   function setAnswerUIState(uiState) {
     ['interaction', 'recording', 'grading'].forEach(k => elements[k].style.display = 'none');
     elements[uiState].style.display = 'block';
+
+    // Disable/enable back button based on recording state for main questions
+    if (state.currentQuestion && state.currentQuestion.type === 'main') {
+      if (uiState === 'recording') {
+        elements.backBtn.disabled = true;
+        elements.backBtn.classList.add('opacity-50', 'cursor-not-allowed'); // Thêm hiệu ứng mờ và con trỏ không cho phép
+      } else {
+        elements.backBtn.disabled = false;
+        elements.backBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+      }
+    }
   }
 
   function startAnswering(questionData, type, index = -1) {
@@ -447,7 +461,13 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         }
       }
-      showScreen('selection');
+      // Nếu bài thi đã kết thúc (do hết giờ), hiển thị kết quả cuối cùng.
+      // Ngược lại, quay về màn hình chọn câu hỏi.
+      if (state.examFinished) {
+        finalizeAndShowResult(true);
+      } else {
+        showScreen('selection');
+      }
     } else if (payload.type === 'supp_question_complete') {
       const scaledScore = Math.max(0, Math.min(1, (Number(data.score) || 0) / (Number(data.max_score) || 10)));
       const result = {
@@ -458,10 +478,11 @@ document.addEventListener('DOMContentLoaded', () => {
       persistSupplementaryItem(result);
 
       const nextIndex = state.currentSuppIndex + 1;
-      if (nextIndex < state.suppQueue.length) {
-        startAnswering(state.suppQueue[nextIndex], 'supplementary', nextIndex);
+      // Nếu hết giờ hoặc hết câu hỏi phụ, kết thúc. Ngược lại, tiếp tục câu tiếp theo.
+      if (state.examFinished || nextIndex >= state.suppQueue.length) {
+        finalizeAndShowResult(true);
       } else {
-        finalizeAndShowResult();
+        startAnswering(state.suppQueue[nextIndex], 'supplementary', nextIndex);
       }
     }
   }
@@ -481,7 +502,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Luôn chia cho tổng số câu hỏi chính (state.questions.length) để tính đúng điểm trung bình.
     // Câu chưa trả lời sẽ có điểm là 0.
     const sumOfScores = state.mainResults.reduce((sum, result) => sum + (Number(result.score) || 0), 0);
-    state.totalScoreMain = sumOfScores / state.questions.length;
+    state.totalScoreMain = state.questions.length > 0 ? sumOfScores / state.questions.length : 0;
 
     document.getElementById('summaryScore').textContent = formatScore(state.totalScoreMain);
     const noteEl = document.getElementById('summaryNote');

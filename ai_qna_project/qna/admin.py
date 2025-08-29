@@ -1,19 +1,28 @@
-# ai_qna_project/qna/admin.py
 from django.contrib import admin
+from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.contrib.auth.models import User
 from .models import (
-    Conversation, UserProfile, Subject, Question,
-    ExamSession, ExamResult, SupplementaryResult
+    Subject, Question, ExamSession, ExamResult,
+    SupplementaryResult, UserProfile
 )
 
-@admin.register(Conversation)
-class ConversationAdmin(admin.ModelAdmin):
-    list_display = ('question_text', 'timestamp')
-    search_fields = ('question_text', 'answer_text')
 
-@admin.register(UserProfile)
-class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ('user', 'full_name', 'student_id', 'class_name')
-    search_fields = ('user__username', 'full_name', 'student_id')
+# Định nghĩa một inline admin cho UserProfile
+class UserProfileInline(admin.StackedInline):
+    model = UserProfile
+    can_delete = False
+    verbose_name_plural = 'Hồ sơ sinh viên'
+    fk_name = 'user'
+
+
+# Định nghĩa một User admin mới để bao gồm UserProfile
+class UserAdmin(BaseUserAdmin):
+    inlines = (UserProfileInline,)
+
+
+# Hủy đăng ký User admin mặc định và đăng ký lại với phiên bản mới của chúng ta
+admin.site.unregister(User)
+admin.site.register(User, UserAdmin)
 
 @admin.register(Subject)
 class SubjectAdmin(admin.ModelAdmin):

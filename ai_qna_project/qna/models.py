@@ -4,14 +4,6 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
 
-class Conversation(models.Model):
-    question_text = models.CharField(max_length=255)
-    answer_text = models.TextField()
-    timestamp = models.DateTimeField(default=timezone.now)
-
-    def __str__(self):
-        return self.question_text
-
 class UserProfile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     full_name = models.CharField(max_length=150, blank=True, default="")

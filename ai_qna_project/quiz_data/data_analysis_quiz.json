@@ -1585,10 +1585,8 @@
                 "text": "Định nghĩa Mô hình ARIMA: mô hình dự báo chuỗi thời gian kết hợp các thành phần tự hồi quy (AR), tích hợp (I), và trung bình trượt (MA).",
                 "weight": 3.0,
                 "conditions": [
-                    {"type": "OR_KEYWORDS", "keywords": ["mô hình phổ biến", "phân tích chuỗi thời gian"], "score_if_met": 1.0},
-                    {"type": "AND_KEYWORDS", "keywords": ["ar", "giá trị quá khứ"], "score_if_met": 1.0, "partial_score_per_keyword": 0.5},
-                    {"type": "AND_KEYWORDS", "keywords": ["i", "sai phân", "non-stationarity"], "score_if_met": 1.0, "partial_score_per_keyword": 0.33},
-                    {"type": "AND_KEYWORDS", "keywords": ["ma", "sai số dự báo quá khứ"], "score_if_met": 1.0, "partial_score_per_keyword": 0.5}
+                    {"type": "OR_KEYWORDS", "keywords": ["mô hình dự báo chuỗi thời gian", "kết hợp các thành phần"], "score_if_met": 1.0},
+                    {"type": "COUNT_KEYWORDS", "keywords": ["tự hồi quy", "ar", "tích hợp", "i", "trung bình trượt", "ma"], "min_count": 3, "score_per_keyword": 0.67, "max_score_for_condition": 2.0, "partial_score_if_less": [{"count": 2, "score": 1.0}, {"count": 1, "score": 0.5}]}
                 ]
             },
             {
@@ -1596,7 +1594,7 @@
                 "text": "Giải thích tham số p: bậc của thành phần AR, số độ trễ của chuỗi thời gian được sử dụng làm biến đầu vào.",
                 "weight": 2.0,
                 "conditions": [
-                    {"type": "AND_KEYWORDS", "keywords": ["p", "ar", "độ trễ"], "score_if_met": 2.0, "partial_score_per_keyword": 0.66}
+                    {"type": "AND_KEYWORDS", "keywords": ["p", "ar", "độ trễ", "biến đầu vào"], "score_if_met": 2.0, "partial_score_per_keyword": 0.5}
                 ]
             },
             {
@@ -1604,7 +1602,7 @@
                 "text": "Giải thích tham số d: số lần sai phân (differencing) cần thiết để làm cho chuỗi thời gian trở nên dừng.",
                 "weight": 2.0,
                 "conditions": [
-                    {"type": "AND_KEYWORDS", "keywords": ["d", "sai phân", "làm dừng"], "score_if_met": 2.0, "partial_score_per_keyword": 0.66}
+                    {"type": "AND_KEYWORDS", "keywords": ["d", "sai phân", "dừng"], "score_if_met": 2.0, "partial_score_per_keyword": 0.67}
                 ]
             },
             {
@@ -1612,7 +1610,7 @@
                 "text": "Giải thích tham số q: số lượng các sai số dự báo trễ được sử dụng làm biến đầu vào.",
                 "weight": 2.0,
                 "conditions": [
-                    {"type": "AND_KEYWORDS", "keywords": ["q", "ma", "sai số dự báo trễ"], "score_if_met": 2.0, "partial_score_per_keyword": 0.66}
+                    {"type": "AND_KEYWORDS", "keywords": ["q", "ma", "sai số dự báo trễ"], "score_if_met": 2.0, "partial_score_per_keyword": 0.67}
                 ]
             },
             {
@@ -1620,8 +1618,8 @@
                 "text": "Cách xác định p, d, q: ACF và PACF (tìm cut-off), Grid search (AIC/BIC thấp nhất).",
                 "weight": 1.0,
                 "conditions": [
-                    {"type": "AND_KEYWORDS", "keywords": ["acf", "pacf", "cut-off"], "score_if_met": 0.5, "partial_score_per_keyword": 0.25},
-                    {"type": "AND_KEYWORDS", "keywords": ["grid search", "aic", "bic"], "score_if_met": 0.5, "partial_score_per_keyword": 0.25}
+                    {"type": "OR_KEYWORDS", "keywords": ["acf", "pacf", "cut-off"], "score_if_met": 0.5},
+                    {"type": "OR_KEYWORDS", "keywords": ["grid search", "aic", "bic"], "score_if_met": 0.5}
                 ]
             }
         ]
@@ -2130,10 +2128,8 @@
                 "text": "Định nghĩa Mô hình ARIMA: mô hình phổ biến cho phân tích chuỗi thời gian. AR (sử dụng giá trị quá khứ), I (loại bỏ tính không dừng bằng sai phân), MA (sử dụng sai số dự báo quá khứ).",
                 "weight": 3.0,
                 "conditions": [
-                    {"type": "OR_KEYWORDS", "keywords": ["mô hình phổ biến", "phân tích chuỗi thời gian"], "score_if_met": 1.0},
-                    {"type": "AND_KEYWORDS", "keywords": ["ar", "giá trị quá khứ"], "score_if_met": 1.0, "partial_score_per_keyword": 0.5},
-                    {"type": "AND_KEYWORDS", "keywords": ["i", "sai phân", "non-stationarity"], "score_if_met": 1.0, "partial_score_per_keyword": 0.33},
-                    {"type": "AND_KEYWORDS", "keywords": ["ma", "sai số dự báo quá khứ"], "score_if_met": 1.0, "partial_score_per_keyword": 0.5}
+                    {"type": "OR_KEYWORDS", "keywords": ["mô hình dự báo chuỗi thời gian", "kết hợp các thành phần"], "score_if_met": 1.0},
+                    {"type": "COUNT_KEYWORDS", "keywords": ["tự hồi quy", "ar", "tích hợp", "i", "trung bình trượt", "ma"], "min_count": 3, "score_per_keyword": 0.67, "max_score_for_condition": 2.0, "partial_score_if_less": [{"count": 2, "score": 1.0}, {"count": 1, "score": 0.5}]}
                 ]
             },
             {
@@ -2141,7 +2137,7 @@
                 "text": "Giải thích tham số p: bậc của thành phần AR, số độ trễ của chuỗi thời gian được sử dụng làm biến đầu vào.",
                 "weight": 2.0,
                 "conditions": [
-                    {"type": "AND_KEYWORDS", "keywords": ["p", "ar", "độ trễ"], "score_if_met": 2.0, "partial_score_per_keyword": 0.66}
+                    {"type": "AND_KEYWORDS", "keywords": ["p", "ar", "độ trễ", "biến đầu vào"], "score_if_met": 2.0, "partial_score_per_keyword": 0.5}
                 ]
             },
             {
@@ -2149,7 +2145,7 @@
                 "text": "Giải thích tham số d: số lần sai phân (differencing) cần thiết để làm cho chuỗi thời gian trở nên dừng.",
                 "weight": 2.0,
                 "conditions": [
-                    {"type": "AND_KEYWORDS", "keywords": ["d", "sai phân", "làm dừng"], "score_if_met": 2.0, "partial_score_per_keyword": 0.66}
+                    {"type": "AND_KEYWORDS", "keywords": ["d", "sai phân", "dừng"], "score_if_met": 2.0, "partial_score_per_keyword": 0.67}
                 ]
             },
             {
@@ -2157,7 +2153,7 @@
                 "text": "Giải thích tham số q: số lượng các sai số dự báo trễ được sử dụng làm biến đầu vào.",
                 "weight": 2.0,
                 "conditions": [
-                    {"type": "AND_KEYWORDS", "keywords": ["q", "ma", "sai số dự báo trễ"], "score_if_met": 2.0, "partial_score_per_keyword": 0.66}
+                    {"type": "AND_KEYWORDS", "keywords": ["q", "ma", "sai số dự báo trễ"], "score_if_met": 2.0, "partial_score_per_keyword": 0.67}
                 ]
             },
             {
@@ -2165,8 +2161,8 @@
                 "text": "Cách xác định p, d, q: ACF và PACF (tìm cut-off), Grid search (AIC/BIC thấp nhất).",
                 "weight": 1.0,
                 "conditions": [
-                    {"type": "AND_KEYWORDS", "keywords": ["acf", "pacf", "cut-off"], "score_if_met": 0.5, "partial_score_per_keyword": 0.25},
-                    {"type": "AND_KEYWORDS", "keywords": ["grid search", "aic", "bic"], "score_if_met": 0.5, "partial_score_per_keyword": 0.25}
+                    {"type": "OR_KEYWORDS", "keywords": ["acf", "pacf", "cut-off"], "score_if_met": 0.5},
+                    {"type": "OR_KEYWORDS", "keywords": ["grid search", "aic", "bic"], "score_if_met": 0.5}
                 ]
             }
         ]
@@ -3199,7 +3195,7 @@
     },
     {
         "id": "Q120",
-        "question": "9. Cách tạo mảng NumPy với các giá trị ngẫu nhiên?",
+        "question": "Cách tạo mảng NumPy với các giá trị ngẫu nhiên?",
         "sample_answer_text": "NumPy có thể tạo ra các mảng với giá trị ngẫu nhiên, rất hữu ích trong các bài toán thử nghiệm hoặc huấn luyện mô hình.",
         "max_score": 10.0,
         "key_points": [
@@ -3216,7 +3212,7 @@
 
     {
         "id": "Q121",
-        "question": "10 Cách sắp xếp mảng NumPy?",
+        "question": "Cách sắp xếp mảng NumPy?",
         "sample_answer_text": "Để sắp xếp mảng NumPy, ta có thể sắp xếp tăng dần hoặc giảm dần tùy mục đích.",
         "max_score": 10.0,
         "key_points": [

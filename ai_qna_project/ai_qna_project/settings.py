@@ -106,7 +106,7 @@ USE_TZ = True
 
 # URLs
 LOGIN_URL = 'login' # Sử dụng tên URL thay vì đường dẫn cứng
-LOGIN_REDIRECT_URL = 'dashboard'
+LOGIN_REDIRECT_URL = 'qna:dashboard'
 LOGOUT_REDIRECT_URL = 'login'
 
 # Static files (CSS, JavaScript, Images)

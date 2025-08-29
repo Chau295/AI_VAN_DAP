@@ -239,38 +239,6 @@ class RegistrationForm(forms.Form):
 # CÁC VIEW HIỂN THỊ TRANG (PAGES)
 # ===========================
 
-def register_view(request: HttpRequest) -> HttpResponse:
-    """Xử lý trang đăng ký tài khoản."""
-    if request.user.is_authenticated:
-        return redirect("qna:dashboard")
-
-    if request.method == "POST":
-        form = RegistrationForm(request.POST)
-        if form.is_valid():
-            data = form.cleaned_data
-            user = User.objects.create_user(
-                username=data["username"],
-                password=data["password"],
-                email=data.get("email", ""),
-                first_name=data["full_name"]
-            )
-
-            profile, _ = UserProfile.objects.get_or_create(user=user)
-            profile.full_name = data["full_name"]
-            profile.class_name = data["class_name"]
-            profile.student_id = data["username"]
-            profile.faculty = data.get("faculty", "")
-            profile.save()
-
-            login(request, user)
-            messages.success(request, "Đăng ký thành công. Chào mừng bạn!")
-            return redirect("qna:dashboard")
-    else:
-        form = RegistrationForm()
-
-    return render(request, "registration/register.html", {"form": form})
-
-
 @login_required
 def dashboard_view(request: HttpRequest) -> HttpResponse:
     """Hiển thị trang dashboard chính sau khi đăng nhập."""
@@ -387,20 +355,20 @@ def _get_avatar_data_url(profile: UserProfile) -> str:
 
 @login_required
 def profile_view(request: HttpRequest) -> HttpResponse:
-    """Hiển thị trang hồ sơ người dùng (chỉ đọc)."""
-    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    # Lấy UserProfile liên kết với người dùng đang đăng nhập.
+    # Sử dụng try-except để xử lý trường hợp hiếm gặp khi profile chưa được tạo.
+    try:
+        profile = request.user.userprofile
+    except UserProfile.DoesNotExist:
+        # Lý tưởng nhất, mỗi User nên có một UserProfile được tạo tự động.
+        # Đây là phương án dự phòng.
+        profile = None
 
     context = {
-        "username": request.user.username,
-        "email": request.user.email,
-        "full_name": profile.full_name or request.user.first_name,
-        "class_name": profile.class_name,
-        "student_id": profile.student_id,
-        "date_joined": request.user.date_joined,
-        "last_login": request.user.last_login,
-        "avatar_url": _get_avatar_data_url(profile),
+        'user': request.user,
+        'profile': profile,
     }
-    return render(request, "qna/profile.html", context)
+    return render(request, 'qna/profile.html', context)
 
 
 @login_required
